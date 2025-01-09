@@ -358,10 +358,6 @@
         </div>
 
         <div id="error-message" class="error-message"></div>
-        <div class="api-warning">
-            Note: This player requires a YouTube API key. If you're seeing quota errors, 
-            the daily API limit has been reached. Please try again tomorrow or use your own API key.
-        </div>
 
         <div id="welcome-section" class="welcome-container">
             <div class="welcome-title">YouTube Playlist Player</div>
@@ -546,7 +542,6 @@
                 // Hide welcome section
                 document.getElementById('welcome-section').style.display = 'none';
                 document.getElementById('initial-controls').style.display = 'none';
-                document.querySelector('.api-warning').style.display = 'none';
 
                 // Show actual content
                 document.getElementById('playlist-container').style.display = 'block';
