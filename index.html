@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Playlist Player</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .input-section {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input {
+            flex: 1;
+            padding: 8px;
+            margin: 0;
+            background-color: #333;
+            border: 1px solid #555;
+            color: #fff;
+            border-radius: 4px;
+        }
+
+        button, select {
+            padding: 8px 16px;
+            margin: 0;
+            background-color: #333;
+            border: 1px solid #555;
+            color: #fff;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+
+        button {
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #444;
+        }
+
+        #player-container {
+            position: relative;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        #playlist-container {
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: #2a2a2a;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .playlist-item {
+            padding: 8px;
+            cursor: pointer;
+            border-bottom: 1px solid #444;
+            touch-action: manipulation;
+        }
+
+        .playlist-item:hover {
+            background-color: #333;
+        }
+
+        .playlist-item.active {
+            background-color: #444;
+        }
+
+        .controls {
+            margin: 10px 0;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #2a2a2a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #666;
+        }
+
+        .loading {
+            display: none;
+            margin-left: 10px;
+            color: #888;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+        .video-counter {
+            margin-left: 10px;
+            color: #888;
+        }
+
+        .playlist-title {
+            font-size: 1.8em;
+            padding: 15px 0;
+            color: #fff;
+            border-bottom: 1px solid #444;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+
+        .nav-button {
+            padding: 8px 20px;
+            background-color: #333;
+            border: 1px solid #555;
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .nav-button:hover {
+            background-color: #444;
+        }
+
+        .playlist-header {
+            display: flex;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid #444;
+            margin-bottom: 15px;
+        }
+
+        .playlist-title {
+            flex: 1;
+            font-size: 1.8em;
+            color: #fff;
+            padding: 0;
+            border-bottom: none;
+            margin-bottom: 0;
+            font-weight: 500;
+        }
+
+        .video-counter {
+            color: #888;
+            margin-left: 15px;
+            font-size: 1.2em;
+        }
+
+        .welcome-container {
+            text-align: center;
+            padding: 40px 20px;
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .welcome-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+
+        .welcome-text {
+            color: #aaa;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .example-text {
+            color: #888;
+            font-family: monospace;
+            background-color: #333;
+            padding: 8px;
+            border-radius: 4px;
+            display: inline-block;
+            margin: 5px 0;
+        }
+
+        .example-section {
+            margin-top: 30px;
+            opacity: 0.6;
+        }
+
+        .example-label {
+            color: #888;
+            font-style: italic;
+            margin: 20px 0 10px 0;
+        }
+
+        .example-playlist-item {
+            padding: 8px;
+            background-color: #333;
+            border-bottom: 1px solid #444;
+            color: #aaa;
+        }
+
+        .example-playlist-header {
+            display: flex;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #444;
+            margin-bottom: 15px;
+        }
+
+        .example-state {
+            opacity: 0.6;
+        }
+
+        #initial-example {
+            margin: 20px 0;
+            border-bottom: none;
+        }
+
+        .resume-button {
+            background-color: #2a6b2a;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        .resume-button:hover {
+            background-color: #357a35;
+        }
+
+        .error-message {
+            background-color: #ff4444;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .api-warning {
+            background-color: #2a2a2a;
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        #playlist-title {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .loop-control {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: #fff;
+            margin-left: 15px;
+            cursor: pointer;
+            padding: 8px 0;
+        }
+
+        .loop-control input[type="checkbox"] {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            margin: 0;
+            accent-color: #444;
+        }
+
+        .playlist-title a {
+            color: #fff;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+
+        .playlist-title a:hover {
+            color: #ff0000; /* YouTube red */
+            text-decoration: none;
+        }
+
+        .playlist-title a:visited {
+            color: #fff;
+        }
+
+        .playlist-title a:visited:hover {
+            color: #ff0000;
+        }
+
+        .playlist-history {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #444;
+        }
+
+        .history-title {
+            font-size: 1.2em;
+            color: #fff;
+            margin-bottom: 15px;
+        }
+
+        .history-item {
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #333;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            color: #fff;
+        }
+
+        .history-item:hover {
+            background-color: #444;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="input-section">
+            <input type="text" id="playlist-input" placeholder="Enter YouTube Playlist URL or ID">
+            <button onclick="loadPlaylist()">Load Playlist</button>
+            <button onclick="shufflePlaylist()">Shuffle</button>
+            <select id="size-selector" onchange="resizePlayer(); saveSession()">
+                <option value="small">Small</option>
+                <option value="medium" selected>Medium</option>
+                <option value="large">Large</option>
+            </select>
+            <button id="resume-button" class="resume-button" onclick="resumeLastSession()">Resume Last Session</button>
+            <span id="loading" class="loading">Loading playlist...</span>
+        </div>
+
+        <div id="error-message" class="error-message"></div>
+        <div class="api-warning">
+            Note: This player requires a YouTube API key. If you're seeing quota errors, 
+            the daily API limit has been reached. Please try again tomorrow or use your own API key.
+        </div>
+
+        <div id="welcome-section" class="welcome-container">
+            <div class="welcome-title">YouTube Playlist Player</div>
+            <div class="welcome-text">
+                Enter a YouTube playlist URL or ID to get started<br>
+                You can enter either a full URL:
+            </div>
+            <div class="example-text">
+                https://www.youtube.com/playlist?list=PLxxx...
+            </div>
+            <div class="welcome-text">
+                Or just the playlist ID:
+            </div>
+            <div class="example-text">
+                PLxxx...
+            </div>
+            
+            <div id="playlist-history" class="playlist-history">
+                <div class="history-title">Recent Playlists</div>
+                <div id="history-items"></div>
+            </div>
+        </div>
+
+        <div id="player-container"></div>
+        
+        <div class="nav-controls example-state" id="initial-controls">
+            <button class="nav-button" disabled>Previous</button>
+            <button class="nav-button" disabled>Next</button>
+        </div>
+
+        <div class="nav-controls" id="actual-controls" style="display: none;">
+            <button class="nav-button" onclick="playPrevious()">Previous</button>
+            <button class="nav-button" onclick="playNext()">Next</button>
+            <label class="loop-control">
+                <input type="checkbox" id="loop-checkbox">
+                Loop Playlist
+            </label>
+        </div>
+
+        <div class="playlist-header" id="actual-playlist-header" style="display: none;">
+            <div id="playlist-title" class="playlist-title"></div>
+            <div id="video-counter" class="video-counter"></div>
+        </div>
+
+        <div id="playlist-container" style="display: none;"></div>
+    </div>
+
+    <script>
+        let player;
+        let playerReady = false;
+        let playerReadyResolve;
+        const playerReadyPromise = new Promise((resolve) => {
+            playerReadyResolve = resolve;
+        });
+
+        let apiLoaded = false;
+        let apiLoadPromise = null;
+
+        let playlistItems = [];
+        let originalPlaylist = [];
+        let playedVideos = [];
+        let currentIndex = 0;
+
+        function initializePlayer() {
+            console.log('Initializing player...');
+            player = new YT.Player('player-container', {
+                height: '480',
+                width: '853',
+                playerVars: {
+                    'playsinline': 1,
+                    'rel': 0,
+                    'origin': window.location.origin,
+                    'modestbranding': 1,
+                    'showinfo': 0,
+                    'enablejsapi': 1
+                },
+                events: {
+                    'onReady': function(event) {
+                        console.log('Player ready');
+                        playerReady = true;
+                        if (playerReadyResolve) {
+                            playerReadyResolve();
+                        }
+                    },
+                    'onStateChange': onPlayerStateChange,
+                    'onError': function(event) {
+                        console.error('Player Error:', event);
+                    }
+                }
+            });
+        }
+
+        // Prevent thumbnail preview requests
+        if (typeof YT !== 'undefined' && YT.PlayerState) {
+            YT.PlayerState.UNSTARTED = -1;
+            YT.PlayerState.ENDED = 0;
+            YT.PlayerState.PLAYING = 1;
+            YT.PlayerState.PAUSED = 2;
+            YT.PlayerState.BUFFERING = 3;
+            YT.PlayerState.CUED = 5;
+        }
+
+        // Handle player state changes
+        function onPlayerStateChange(event) {
+            if (event.data === YT.PlayerState.ENDED) {
+                const isLooping = document.getElementById('loop-checkbox').checked;
+                if (isLooping || currentIndex < playlistItems.length - 1) {
+                    playNext();
+                }
+            }
+        }
+
+        // Extract playlist ID from URL or direct ID
+        function getPlaylistId(input) {
+            console.log('Raw input:', input);
+            
+            if (!input) return null;
+            
+            // Clean the input of any @ symbols or whitespace
+            input = input.trim().replace('@', '');
+            console.log('Cleaned input:', input);
+            
+            // Handle full URLs
+            let matches = input.match(/[?&]list=([A-Za-z0-9_-]+)/);
+            if (matches) {
+                console.log('Found playlist ID from URL:', matches[1]);
+                return matches[1];
+            }
+            
+            // Try direct match for playlist ID
+            matches = input.match(/^([A-Za-z0-9_-]+)$/);
+            if (matches) {
+                console.log('Found direct playlist ID:', matches[1]);
+                return matches[1];
+            }
+            
+            console.log('No valid playlist ID found');
+            return null;
+        }
+
+        // Load playlist
+        async function loadPlaylist() {
+            const loadingIndicator = document.getElementById('loading');
+            const errorMsg = document.getElementById('error-message');
+            const inputElement = document.getElementById('playlist-input');
+            
+            try {
+                // Show loading state
+                if (loadingIndicator) loadingIndicator.style.display = 'inline';
+                if (errorMsg) errorMsg.style.display = 'none';
+
+                const input = inputElement.value.trim();
+                const playlistId = getPlaylistId(input);
+                if (!playlistId) {
+                    throw new Error('Invalid playlist URL or ID');
+                }
+
+                // Load YouTube API and wait for it
+                await loadYouTubeAPI();
+
+                // Initialize player if needed
+                if (!player) {
+                    initializePlayer();
+                    await playerReadyPromise;
+                }
+
+                // Fetch playlist items
+                const items = await fetchPlaylistItems(playlistId);
+                
+                if (!items || items.length === 0) {
+                    throw new Error('No videos found in playlist');
+                }
+
+                // Update playlist data
+                playlistItems = items;
+                currentIndex = 0;
+
+                // Hide welcome section
+                document.getElementById('welcome-section').style.display = 'none';
+                document.getElementById('initial-controls').style.display = 'none';
+                document.querySelector('.api-warning').style.display = 'none';
+
+                // Show actual content
+                document.getElementById('playlist-container').style.display = 'block';
+                document.getElementById('actual-controls').style.display = 'flex';
+                document.getElementById('actual-playlist-header').style.display = 'flex';
+
+                // After successfully loading playlist, save to history
+                if (items[0] && items[0].snippet) {
+                    saveToHistory(playlistId, items[0].snippet.playlistTitle);
+                }
+
+                // Initialize played videos with first video
+                playedVideos = [items[0]];
+                
+                // Display playlist and play first video
+                displayPlaylist();
+                const firstVideoId = items[0].snippet.resourceId.videoId;
+                player.loadVideoById(firstVideoId);
+
+            } catch (error) {
+                console.error('Error:', error);
+                if (errorMsg) {
+                    errorMsg.style.display = 'block';
+                    errorMsg.textContent = `Error: ${error.message}`;
+                }
+            } finally {
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+        }
+
+        // Fetch playlist items using YouTube Data API
+        async function fetchPlaylistItems(playlistId, pageToken = '', items = []) {
+            console.log(`Starting fetch for playlist: ${playlistId}`);
+            
+            //const apiKey = 'AIzaSyBZ4Ow6AF03kHdJrbeYODzJ8FFNKZ-iTVE';
+            const apiKey = 'AIzaSyD4nA8bLUU8rUqx6dZwIOV7x6EXyFPru9w';
+            const maxResults = 50;
+            
+            try {
+                // First, get the playlist title
+                const playlistUrl = `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${playlistId}&key=${apiKey}`;
+                const playlistResponse = await fetch(playlistUrl);
+                const playlistData = await playlistResponse.json();
+                
+                if (playlistData.error) {
+                    throw new Error(playlistData.error.message);
+                }
+
+                const playlistTitle = playlistData.items?.[0]?.snippet?.title || 'Playlist';
+                
+                // Now fetch the playlist items
+                const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=${maxResults}&playlistId=${playlistId}&key=${apiKey}${pageToken ? '&pageToken=' + pageToken : ''}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message);
+                }
+
+                if (!data.items || data.items.length === 0) {
+                    throw new Error('No videos found in playlist');
+                }
+
+                // Add playlist title to each item
+                const itemsWithTitle = data.items.map(item => ({
+                    ...item,
+                    snippet: {
+                        ...item.snippet,
+                        playlistTitle: playlistTitle
+                    }
+                }));
+
+                items.push(...itemsWithTitle);
+
+                if (data.nextPageToken) {
+                    return fetchPlaylistItems(playlistId, data.nextPageToken, items);
+                }
+
+                return items;
+            } catch (error) {
+                console.error('Error in fetchPlaylistItems:', error);
+                throw error;
+            }
+        }
+
+        // Display playlist
+        function displayPlaylist() {
+            const container = document.getElementById('playlist-container');
+            const playlistTitle = document.getElementById('playlist-title');
+            
+            if (playlistTitle) {
+                const playlistId = getPlaylistId(document.getElementById('playlist-input').value);
+                playlistTitle.innerHTML = `<a href="https://www.youtube.com/playlist?list=${playlistId}" target="_blank">${playlistItems[0].snippet.playlistTitle || 'Playlist'}</a>`;
+            }
+
+            if (!container || !playlistItems || playlistItems.length === 0) return;
+
+            container.innerHTML = ''; // Clear existing content
+            
+            // Create and append playlist items
+            playlistItems.forEach((item, index) => {
+                if (item && item.snippet) {
+                    const div = document.createElement('div');
+                    div.className = 'playlist-item';
+                    if (index === currentIndex) {
+                        div.classList.add('active');
+                    }
+                    div.textContent = item.snippet.title;
+                    div.onclick = () => playVideo(index);
+                    container.appendChild(div);
+
+                    // If this is the current item, scroll it into view
+                    if (index === currentIndex) {
+                        // Use setTimeout to ensure DOM is updated
+                        setTimeout(() => {
+                            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 100);
+                    }
+                }
+            });
+
+            // Update video counter
+            const counter = document.getElementById('video-counter');
+            if (counter) {
+                counter.textContent = `${currentIndex + 1}/${playlistItems.length}`;
+            }
+        }
+
+        // Play video at specific index
+        async function playVideo(index) {
+            if (!playlistItems || !playlistItems[index]) {
+                console.error('Invalid video index or no playlist loaded');
+                return;
+            }
+
+            try {
+                if (!playerReady) {
+                    await playerReadyPromise;
+                }
+
+                currentIndex = index;
+                const videoItem = playlistItems[index];
+                const videoId = videoItem.snippet.resourceId.videoId;
+
+                // Update played videos history
+                // If this is a new video (not in history), add it
+                const lastPlayed = playedVideos[playedVideos.length - 1];
+                if (!lastPlayed || lastPlayed.snippet.resourceId.videoId !== videoId) {
+                    playedVideos.push(videoItem);
+                }
+                
+                // Update player
+                player.loadVideoById(videoId);
+                
+                // Update UI
+                displayPlaylist();
+                
+                // Save session
+                saveSession();
+
+                // Debug log
+                console.log('Played videos history:', playedVideos.map(v => v.snippet.title));
+                console.log('Current index:', currentIndex);
+            } catch (error) {
+                console.error('Error playing video:', error);
+                const errorMsg = document.getElementById('error-message');
+                if (errorMsg) {
+                    errorMsg.style.display = 'block';
+                    errorMsg.textContent = 'Error playing video. Please try again.';
+                }
+            }
+        }
+
+        // Play next video
+        function playNext() {
+            if (!playlistItems || playlistItems.length === 0) return;
+
+            const isLooping = document.getElementById('loop-checkbox').checked;
+            
+            // Calculate next index
+            let nextIndex = currentIndex + 1;
+            
+            // If we're at the end
+            if (nextIndex >= playlistItems.length) {
+                if (isLooping) {
+                    // Loop back to start if looping is enabled
+                    nextIndex = 0;
+                } else {
+                    // Stop at the end if not looping
+                    return;
+                }
+            }
+            
+            currentIndex = nextIndex;
+            playVideo(currentIndex);
+        }
+
+        // Shuffle playlist
+        function shufflePlaylist() {
+            if (!playlistItems || playlistItems.length === 0) return;
+
+            // Save current video
+            const currentVideo = playlistItems[currentIndex];
+            
+            // Create a copy of the playlist without current video
+            let remainingVideos = playlistItems.filter((_, index) => index !== currentIndex);
+            
+            // Shuffle remaining videos
+            for (let i = remainingVideos.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [remainingVideos[i], remainingVideos[j]] = [remainingVideos[j], remainingVideos[i]];
+            }
+            
+            // Put current video back at top
+            playlistItems = [currentVideo, ...remainingVideos];
+            currentIndex = 0;
+            
+            // Reset played videos array
+            playedVideos = [currentVideo];
+            
+            // Update display
+            displayPlaylist();
+            
+            // Save the current state
+            saveSession();
+        }
+
+        // Update active item in playlist
+        function updateActiveItem() {
+            const items = document.getElementsByClassName('playlist-item');
+            for (let i = 0; i < items.length; i++) {
+                items[i].classList.remove('active');
+            }
+            if (items[currentIndex]) {
+                items[currentIndex].classList.add('active');
+            }
+        }
+
+        // Resize player
+        function resizePlayer() {
+            const size = document.getElementById('size-selector').value;
+            const container = document.getElementById('player-container');
+            
+            switch(size) {
+                case 'small':
+                    player.setSize(427, 240);
+                    break;
+                case 'medium':
+                    player.setSize(853, 480);
+                    break;
+                case 'large':
+                    player.setSize(1280, 720);
+                    break;
+            }
+        }
+
+        function playPrevious() {
+            if (!playlistItems || playlistItems.length === 0) return;
+
+            // Move to previous index, loop to end if at start
+            currentIndex = (currentIndex - 1 + playlistItems.length) % playlistItems.length;
+            playVideo(currentIndex);
+        }
+
+        // Save session data
+        function saveSession() {
+            const sessionData = {
+                playlistId: getPlaylistId(document.getElementById('playlist-input').value),
+                currentIndex: currentIndex,
+                playlistItems: playlistItems,
+                playedVideos: playedVideos,
+                isLooping: document.getElementById('loop-checkbox').checked,
+                playerSize: document.getElementById('size-selector').value
+            };
+            localStorage.setItem('youtubePlayerSession', JSON.stringify(sessionData));
+        }
+
+        // Resume last session
+        async function resumeLastSession() {
+            const savedSession = localStorage.getItem('youtubePlayerSession');
+            if (savedSession) {
+                const sessionData = JSON.parse(savedSession);
+                document.getElementById('playlist-input').value = sessionData.playlistId;
+                
+                // Restore loop state
+                if (sessionData.isLooping !== undefined) {
+                    document.getElementById('loop-checkbox').checked = sessionData.isLooping;
+                }
+
+                // Restore size selection
+                if (sessionData.playerSize) {
+                    document.getElementById('size-selector').value = sessionData.playerSize;
+                }
+
+                await loadPlaylist();
+                
+                // After playlist loads, apply the saved size
+                if (sessionData.playerSize) {
+                    resizePlayer();
+                }
+            }
+        }
+
+        // Check if there's a saved session on page load
+        window.addEventListener('load', function() {
+            const savedSession = localStorage.getItem('youtubePlayerSession');
+            if (!savedSession) {
+                document.getElementById('resume-button').style.display = 'none';
+            }
+        });
+
+        // Load YouTube IFrame API with error handling
+        function loadYouTubeAPI() {
+            if (apiLoadPromise) return apiLoadPromise;
+            
+            apiLoadPromise = new Promise((resolve) => {
+                if (window.YT) {
+                    apiLoaded = true;
+                    resolve();
+                    return;
+                }
+
+                window.onYouTubeIframeAPIReady = function() {
+                    console.log('YouTube API loaded');
+                    apiLoaded = true;
+                    resolve();
+                };
+
+                const tag = document.createElement('script');
+                tag.src = 'https://www.youtube.com/iframe_api';
+                const firstScriptTag = document.getElementsByTagName('script')[0];
+                firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+            });
+
+            return apiLoadPromise;
+        }
+
+        // Initialize everything with proper error handling
+        async function initializeApplication() {
+            try {
+                await loadYouTubeAPI();
+                // Additional initialization can go here
+            } catch (error) {
+                console.error('Failed to initialize application:', error);
+                const errorMsg = document.getElementById('error-message');
+                errorMsg.style.display = 'block';
+                errorMsg.textContent = 'Failed to load YouTube player. Please check your connection and refresh the page.';
+            }
+        }
+
+        // Call this when the page loads
+        document.addEventListener('DOMContentLoaded', initializeApplication);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Show initial UI state
+            const exampleSection = document.getElementById('example-section');
+            const playlistContainer = document.getElementById('playlist-container');
+            
+            if (exampleSection) {
+                exampleSection.style.display = 'block';
+            }
+            if (playlistContainer) {
+                playlistContainer.style.display = 'none';
+            }
+        });
+
+        // Add this new function to fetch playlist details
+        async function fetchPlaylistDetails(playlistId) {
+            const apiKey = 'AIzaSyBZ4Ow6AF03kHdJrbeYODzJ8FFNKZ-iTVE'; // Your API key
+            const url = `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${playlistId}&key=${apiKey}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message);
+                }
+
+                if (data.items && data.items.length > 0) {
+                    return {
+                        title: data.items[0].snippet.title,
+                        description: data.items[0].snippet.description
+                    };
+                }
+                
+                throw new Error('Playlist not found');
+            } catch (error) {
+                console.error('Error fetching playlist details:', error);
+                return { title: 'Playlist', description: '' };
+            }
+        }
+
+        function saveToHistory(playlistId, title) {
+            let history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+            
+            // Create history item
+            const historyItem = {
+                id: playlistId,
+                title: title,
+                timestamp: Date.now()
+            };
+            
+            // Remove duplicate if exists
+            history = history.filter(item => item.id !== playlistId);
+            
+            // Add new item at the beginning
+            history.unshift(historyItem);
+            
+            // Keep only last 5 items
+            history = history.slice(0, 5);
+            
+            // Save to localStorage
+            localStorage.setItem('playlistHistory', JSON.stringify(history));
+            
+            // Update display
+            displayHistory();
+        }
+
+        function displayHistory() {
+            const historyContainer = document.getElementById('history-items');
+            if (!historyContainer) return;
+
+            const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+            
+            if (history.length === 0) {
+                document.getElementById('playlist-history').style.display = 'none';
+                return;
+            }
+
+            historyContainer.innerHTML = '';
+            history.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.textContent = item.title || `Playlist ${item.id}`;
+                div.onclick = () => loadHistoryItem(item.id);
+                historyContainer.appendChild(div);
+            });
+        }
+
+        function loadHistoryItem(playlistId) {
+            document.getElementById('playlist-input').value = playlistId;
+            loadPlaylist();
+        }
+
+        // Add this to initialize history display when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            displayHistory();
+        });
+    </script>
+</body>
+</html>
