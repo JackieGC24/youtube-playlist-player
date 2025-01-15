@@ -446,6 +446,36 @@
             color: #666;
             font-size: 12px;
         }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #333;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .notification.show {
+            opacity: 1;
+            animation: flashNotification 0.3s ease;
+        }
+
+        @keyframes flashNotification {
+            0% {
+                background-color: #fff;
+                color: #333;
+            }
+            100% {
+                background-color: #333;
+                color: #fff;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1270,16 +1300,48 @@
             }
         }
 
+        // Add function to clean up invalid history entries
+        function cleanupPlaylistHistory() {
+            try {
+                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+                
+                // Filter out invalid entries
+                const validHistory = history.filter(entry => {
+                    return entry 
+                        && Array.isArray(entry.ids) 
+                        && entry.ids.length > 0
+                        && Array.isArray(entry.titles)
+                        && entry.titles.length > 0
+                        && entry.timestamp;
+                });
+
+                // If entries were removed, show notification
+                if (validHistory.length !== history.length) {
+                    const removedCount = history.length - validHistory.length;
+                    showNotification(`Cleaned up ${removedCount} invalid playlist${removedCount !== 1 ? 's' : ''} from history`);
+                    localStorage.setItem('playlistHistory', JSON.stringify(validHistory));
+                }
+                
+                return validHistory;
+            } catch (e) {
+                console.error('Error cleaning history:', e);
+                showNotification('History data was reset due to corruption');
+                localStorage.setItem('playlistHistory', '[]');
+                return [];
+            }
+        }
+
+        // Update displayHistory to use the cleanup function
         function displayHistory() {
             const historyContainer = document.getElementById('history-items');
             
             if (!historyContainer) return;
 
             try {
-                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+                const history = cleanupPlaylistHistory();
                 historyContainer.innerHTML = '';
 
-                if (!Array.isArray(history) || history.length === 0) {
+                if (history.length === 0) {
                     historyContainer.innerHTML = '<div class="history-item">No recent playlists</div>';
                     return;
                 }
@@ -1348,6 +1410,7 @@
 
             } catch (e) {
                 console.error('Error in displayHistory:', e);
+                historyContainer.innerHTML = '<div class="history-item">Error loading history</div>';
             }
         }
 
@@ -1422,56 +1485,39 @@
             }
         }
 
+        // Update toggleFavorite function to remove debug logs
         function toggleFavorite() {
-            console.log('Toggle favorite called');
+            const input = document.getElementById('playlist-input');
+            const playlistId = getPlaylistId(input.value);
             
-            // Get unique playlist IDs and titles from current playlistItems
-            const uniqueItems = playlistItems.reduce((acc, item) => {
-                const id = getPlaylistId(item.snippet.playlistId);
-                const title = item.snippet.playlistTitle;
-                
-                // Only add if we don't already have this ID
-                if (id && !acc.ids.includes(id)) {
-                    acc.ids.push(id);
-                    acc.titles.push(title);
-                }
-                return acc;
-            }, { ids: [], titles: [] });
+            if (!playlistId) return;
             
-            const currentPlaylist = {
-                ids: uniqueItems.ids,
-                titles: uniqueItems.titles,
-                timestamp: Date.now()
-            };
-            
-            console.log('Saving playlist with:', currentPlaylist);
-            
-            let favorites = [];
             try {
-                favorites = JSON.parse(localStorage.getItem('playlistFavorites') || '[]');
-                if (!Array.isArray(favorites)) {
-                    favorites = [];
-                }
-            } catch (e) {
-                favorites = [];
-            }
-            
-            // Check if already favorited
-            const isFavorited = favorites.some(fav => 
-                JSON.stringify(fav.ids.sort()) === JSON.stringify(currentPlaylist.ids.sort())
-            );
-            
-            if (isFavorited) {
-                favorites = favorites.filter(fav => 
-                    JSON.stringify(fav.ids.sort()) !== JSON.stringify(currentPlaylist.ids.sort())
+                let favorites = JSON.parse(localStorage.getItem('playlistFavorites') || '[]');
+                const currentPlaylist = {
+                    ids: [playlistId],
+                    titles: playlistItems.map(item => item.snippet.title)
+                };
+                
+                // Check if playlist is already in favorites
+                const existingIndex = favorites.findIndex(entry => 
+                    entry.ids && entry.ids.includes(playlistId)
                 );
-            } else {
-                favorites.unshift(currentPlaylist);
+                
+                if (existingIndex === -1) {
+                    // Add to favorites
+                    favorites.unshift(currentPlaylist);
+                } else {
+                    // Remove from favorites
+                    favorites.splice(existingIndex, 1);
+                }
+                
+                localStorage.setItem('playlistFavorites', JSON.stringify(favorites));
+                updateFavoriteButton();
+                displayFavorites();
+            } catch (e) {
+                console.error('Error toggling favorite:', e);
             }
-            
-            localStorage.setItem('playlistFavorites', JSON.stringify(favorites));
-            updateFavoriteButton();
-            displayFavorites();
         }
 
         function updateFavoriteButton() {
@@ -1565,46 +1611,7 @@
             }
         }
 
-        // Add this temporary debug function
-        function debugFavorites() {
-            console.log('=== DEBUG FAVORITES ===');
-            
-            // Check raw localStorage
-            const raw = localStorage.getItem('playlistFavorites');
-            console.log('Raw favorites from localStorage:', raw);
-            
-            // Try parsing
-            try {
-                const parsed = JSON.parse(raw || '[]');
-                console.log('Parsed favorites:', parsed);
-                
-                // Check structure
-                if (Array.isArray(parsed)) {
-                    console.log('Number of favorites:', parsed.length);
-                    parsed.forEach((fav, index) => {
-                        console.log(`Favorite ${index}:`, {
-                            ids: fav.ids,
-                            titles: fav.titles,
-                            hasPlaylistItems: !!fav.playlistItems
-                        });
-                    });
-                } else {
-                    console.log('Parsed data is not an array!');
-                }
-            } catch (e) {
-                console.error('Error parsing favorites:', e);
-            }
-            
-            // Check DOM elements
-            console.log('Favorites container:', document.getElementById('favorites-items'));
-            console.log('Favorites section:', document.getElementById('playlist-favorites'));
-        }
-
-        // Call it on page load and after toggling favorites
-        document.addEventListener('DOMContentLoaded', debugFavorites);
-
         document.addEventListener('DOMContentLoaded', () => {
-            console.log('DOM loaded, displaying favorites...');
             displayFavorites();
         });
 
@@ -1660,19 +1667,109 @@
         // Call this when the page loads
         document.addEventListener('DOMContentLoaded', addStyles);
 
-        // Add version number
-        document.addEventListener('DOMContentLoaded', function() {
-            const versionElement = document.getElementById('version');
-            if (versionElement) {
-                versionElement.textContent = 'v1.0.1';
-            }
-        });
-
         // Hide resume button
         document.addEventListener('DOMContentLoaded', function() {
             const resumeButton = document.getElementById('resume-button');
             if (resumeButton) {
                 resumeButton.style.display = 'none';
+            }
+        });
+
+        // Add notification styles
+        const style = document.createElement('style');
+        style.textContent = `
+            .notification {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background-color: #333;
+                color: white;
+                padding: 15px 20px;
+                border-radius: 5px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                z-index: 1000;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            }
+
+            .notification.show {
+                opacity: 1;
+                animation: flashNotification 0.3s ease;
+            }
+
+            @keyframes flashNotification {
+                0% {
+                    background-color: #fff;
+                    color: #333;
+                }
+                100% {
+                    background-color: #333;
+                    color: #fff;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Update showNotification with longer duration
+        function showNotification(message, duration = 5000) {
+            // Remove any existing notification
+            const existingNotification = document.querySelector('.notification');
+            if (existingNotification) {
+                existingNotification.remove();
+            }
+
+            // Create new notification
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            // Trigger animation
+            setTimeout(() => notification.classList.add('show'), 10);
+
+            // Remove after duration
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, duration);
+        }
+
+        // Update cleanupPlaylistHistory to show notification when data is cleared
+        function cleanupPlaylistHistory() {
+            try {
+                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+                
+                // Filter out invalid entries
+                const validHistory = history.filter(entry => {
+                    return entry 
+                        && Array.isArray(entry.ids) 
+                        && entry.ids.length > 0
+                        && Array.isArray(entry.titles)
+                        && entry.titles.length > 0
+                        && entry.timestamp;
+                });
+
+                // If entries were removed, show notification
+                if (validHistory.length !== history.length) {
+                    const removedCount = history.length - validHistory.length;
+                    showNotification(`Cleaned up ${removedCount} invalid playlist${removedCount !== 1 ? 's' : ''} from history`);
+                    localStorage.setItem('playlistHistory', JSON.stringify(validHistory));
+                }
+                
+                return validHistory;
+            } catch (e) {
+                console.error('Error cleaning history:', e);
+                showNotification('History data was reset due to corruption');
+                localStorage.setItem('playlistHistory', '[]');
+                return [];
+            }
+        }
+    
+    // Add version number
+    document.addEventListener('DOMContentLoaded', function() {
+            const versionElement = document.getElementById('version');
+            if (versionElement) {
+                versionElement.textContent = 'v1.0.2';
             }
         });
     </script>
