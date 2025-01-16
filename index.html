@@ -476,6 +476,40 @@
                 color: #fff;
             }
         }
+
+        .section-header {
+            position: relative;
+            text-align: center;
+            padding: 10px 20px;
+            margin: 0;
+        }
+
+        .section-header h3 {
+            display: inline;  /* Keep header inline */
+            margin: 0;
+            font-weight: normal;
+            position: relative;  /* For positioning the clear button */
+        }
+
+        .clear-button {
+            position: absolute;
+            left: calc(50% + 85px);  /* Increased offset to prevent overlap */
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            transition: all 0.2s ease;
+        }
+
+        .clear-button:hover {
+            color: #ff4444;
+            background-color: rgba(255, 68, 68, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -518,7 +552,10 @@
             </div>
 
             <div id="playlist-history" class="playlist-history">
-                <div class="history-title">Recent Playlists</div>
+                <div class="section-header">
+                    <h3>Recent Playlists</h3>
+                    <button class="clear-button" onclick="clearHistory()" title="Clear history">clear</button>
+                </div>
                 <div id="history-items"></div>
             </div>
         </div>
@@ -1240,15 +1277,11 @@
             try {
                 // Clean up the inputs
                 const ids = Array.isArray(playlistId) ? playlistId : [playlistId];
-                
-                // Clean up the title - split by comma if it's a combined title
                 let titles = Array.isArray(title) ? title : [title];
-                titles = titles.map(t => t.split(','))  // Split any comma-separated titles
-                              .flat()                   // Flatten the array
-                              .map(t => t.trim())       // Trim whitespace
-                              .filter(t => t);          // Remove empty strings
-                
-                console.log('Cleaned inputs:', { ids, titles });
+                titles = titles.map(t => t.split(','))
+                              .flat()
+                              .map(t => t.trim())
+                              .filter(t => t);
 
                 // Get existing history
                 let history = [];
@@ -1257,25 +1290,23 @@
                     history = JSON.parse(stored);
                 }
 
-                // Create new entry
-                let newEntry;
-                const isAddingToExisting = document.getElementById('add-playlist-button').style.display === 'inline';
+                // Create new entry - ONLY combine if explicitly adding to current playlist
+                const addPlaylistButton = document.getElementById('add-playlist-button');
+                const isExplicitlyAdding = addPlaylistButton && 
+                                         addPlaylistButton.style.display === 'inline' &&
+                                         addPlaylistButton.dataset.adding === 'true'; // New flag to track explicit adds
 
-                if (isAddingToExisting && history.length > 0) {
-                    // Get the most recent entry
+                let newEntry;
+                if (isExplicitlyAdding && history.length > 0) {
                     const current = history[0];
-                    
-                    // Create new entry with combined unique values
                     newEntry = {
                         ids: [...new Set([...current.ids, ...ids])],
                         titles: [...new Set([...current.titles, ...titles])],
                         timestamp: Date.now()
                     };
-                    
-                    // Remove the old entry
                     history.shift();
                 } else {
-                    // Create new single entry
+                    // Create new single entry for fresh loads
                     newEntry = {
                         ids: ids,
                         titles: titles,
@@ -1285,18 +1316,45 @@
 
                 // Add new entry to start of history
                 history.unshift(newEntry);
-                
-                // Keep only last 10 entries
-                history = history.slice(0, 10);
-
-                console.log('Saving entry:', newEntry);
+                history = history.slice(0, 5);
                 localStorage.setItem('playlistHistory', JSON.stringify(history));
-                
-                // Update display
                 displayHistory();
                 
             } catch (e) {
                 console.error('Error saving history:', e);
+            }
+        }
+
+        // Update addPlaylist function to properly combine playlists
+        async function addPlaylist() {
+            try {
+                const addButton = document.getElementById('add-playlist-button');
+                addButton.dataset.adding = 'true';
+
+                // Store the current playlist items
+                const currentItems = [...playlistItems];
+                
+                // Load and combine the new playlist
+                await loadPlaylist();
+                
+                // Combine the playlists
+                playlistItems = [...currentItems, ...playlistItems];
+                
+                // Update the display
+                displayPlaylist();
+                
+                // Update the video counter
+                const counter = document.getElementById('video-counter');
+                if (counter) {
+                    counter.textContent = `${currentIndex + 1}/${playlistItems.length}`;
+                }
+                
+            } catch (e) {
+                console.error('Error adding playlist:', e);
+                showNotification('Error adding playlist');
+            } finally {
+                const addButton = document.getElementById('add-playlist-button');
+                addButton.dataset.adding = 'false';
             }
         }
 
@@ -1411,77 +1469,6 @@
             } catch (e) {
                 console.error('Error in displayHistory:', e);
                 historyContainer.innerHTML = '<div class="history-item">Error loading history</div>';
-            }
-        }
-
-        // Update addPlaylist to save combined playlists to history
-        async function addPlaylist() {
-            const loadingIndicator = document.getElementById('loading');
-            const errorMsg = document.getElementById('error-message');
-            const inputElement = document.getElementById('playlist-input');
-            
-            try {
-                // Show loading state
-                if (loadingIndicator) loadingIndicator.style.display = 'inline';
-                if (errorMsg) errorMsg.style.display = 'none';
-
-                const input = inputElement.value.trim();
-                const playlistId = getPlaylistId(input);
-                if (!playlistId) {
-                    throw new Error('Invalid playlist URL or ID');
-                }
-
-                // Fetch new playlist items
-                const newItems = await fetchPlaylistItems(playlistId);
-                
-                if (!newItems || newItems.length === 0) {
-                    throw new Error('No videos found in playlist');
-                }
-
-                // Store current playlist info before adding new items
-                const currentIds = [getPlaylistId(document.getElementById('playlist-input').value)];
-                const currentTitles = [playlistItems[0].snippet.playlistTitle];
-
-                // Add new items to existing playlist
-                const currentLength = playlistItems.length;
-                playlistItems = playlistItems.concat(newItems);
-
-                // Get all unique playlist IDs and titles from the current session
-                const existingHistory = JSON.parse(localStorage.getItem('playlistHistory') || '[]')[0];
-                if (existingHistory && existingHistory.ids) {
-                    currentIds.push(...existingHistory.ids.slice(1));  // Add all except first (which we already have)
-                    currentTitles.push(...existingHistory.titles.slice(1));
-                }
-
-                // Add new playlist info to arrays
-                currentIds.push(playlistId);
-                currentTitles.push(newItems[0].snippet.playlistTitle);
-
-                // Save combined playlists to history
-                saveToHistory(currentIds, currentTitles);
-
-                // Update display
-                displayPlaylist();
-                
-                // Update counter
-                const counter = document.getElementById('video-counter');
-                if (counter) {
-                    counter.textContent = `${currentIndex + 1}/${playlistItems.length}`;
-                }
-
-                // Clear input
-                inputElement.value = '';
-
-            } catch (error) {
-                console.error('Error:', error);
-                if (errorMsg) {
-                    errorMsg.style.display = 'block';
-                    errorMsg.textContent = `Error: ${error.message}`;
-                }
-            } finally {
-                if (loadingIndicator) {
-                    loadingIndicator.style.display = 'none';
-                }
             }
         }
 
@@ -1769,9 +1756,20 @@
     document.addEventListener('DOMContentLoaded', function() {
             const versionElement = document.getElementById('version');
             if (versionElement) {
-                versionElement.textContent = 'v1.0.2';
+                versionElement.textContent = 'v1.0.3';
             }
         });
+
+        function clearHistory() {
+            try {
+                localStorage.removeItem('playlistHistory');
+                displayHistory();
+                showNotification('Playlist history cleared');
+            } catch (e) {
+                console.error('Error clearing history:', e);
+                showNotification('Error clearing playlist history');
+            }
+        }
     </script>
     <!-- Add version display element -->
     <div id="version"></div>
