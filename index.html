@@ -677,8 +677,8 @@
             return null;
         }
 
-        // Load playlist
-        async function loadPlaylist() {
+        // Update loadPlaylist function to handle playlist combinations
+        async function loadPlaylist(preventAutoPlay = false) {
             const loadingIndicator = document.getElementById('loading');
             const errorMsg = document.getElementById('error-message');
             const inputElement = document.getElementById('playlist-input');
@@ -711,9 +711,21 @@
                     throw new Error('No videos found in playlist');
                 }
 
-                // Update playlist data
-                playlistItems = items;
-                currentIndex = 0;
+                // Check if we're adding to existing playlist
+                const addButton = document.getElementById('add-playlist-button');
+                const isAdding = addButton && 
+                               addButton.style.display === 'inline' &&
+                               addButton.dataset.adding === 'true';
+
+                if (!isAdding) {
+                    // New playlist load
+                    playlistItems = items;
+                    currentIndex = 0;
+                } else {
+                    // Adding to existing playlist - don't change currentIndex
+                    // Don't combine here - let addPlaylist handle it
+                    playlistItems = items;
+                }
 
                 // Hide welcome section completely
                 if (welcomeSection) {
@@ -731,13 +743,19 @@
                     saveToHistory(playlistId, items[0].snippet.playlistTitle);
                 }
 
-                // Initialize played videos
-                playedVideos = [items[0]];
+                // Initialize played videos only for new playlist loads
+                if (!isAdding) {
+                    playedVideos = [items[0]];
+                }
                 
-                // Display playlist and play first video
+                // Display playlist
                 displayPlaylist();
-                const firstVideoId = items[0].snippet.resourceId.videoId;
-                player.loadVideoById(firstVideoId);
+
+                // Only load first video if this is a new playlist load and not prevented
+                if (!isAdding && !preventAutoPlay) {
+                    const firstVideoId = items[0].snippet.resourceId.videoId;
+                    player.loadVideoById(firstVideoId);
+                }
 
                 displayFavorites();
                 updateFavoriteButton();
@@ -754,7 +772,7 @@
                 if (welcomeSection) {
                     welcomeSection.style.display = 'block';
                 }
-                displayHistory(); // Update history display
+                displayHistory();
                 
                 throw error;
             } finally {
@@ -1160,11 +1178,20 @@
 
                             // Load additional playlists
                             if (lastSession.ids.length > 1) {
+                                const savedIndex = currentIndex;  // Save position after first playlist loads
+                                
                                 for (let i = 1; i < lastSession.ids.length; i++) {
-                                    setTimeout(() => {
+                                    new Promise(resolve => setTimeout(resolve, 1500)).then(() => {
+                                        const currentItems = [...playlistItems];  // Save current items
+                                        
                                         input.value = lastSession.ids[i];
-                                        addPlaylist();
-                                    }, i * 1500);
+                                        loadPlaylist();
+                                    });
+                                    
+                                    // Combine while maintaining position
+                                    playlistItems = [...currentItems, ...playlistItems];
+                                    currentIndex = savedIndex;  // Keep original position
+                                    displayPlaylist();
                                 }
                             }
                         }
@@ -1275,13 +1302,12 @@
 
         function saveToHistory(playlistId, title) {
             try {
-                // Clean up the inputs
-                const ids = Array.isArray(playlistId) ? playlistId : [playlistId];
-                let titles = Array.isArray(title) ? title : [title];
-                titles = titles.map(t => t.split(','))
-                              .flat()
-                              .map(t => t.trim())
-                              .filter(t => t);
+                // Clean up the inputs and ensure uniqueness
+                const ids = Array.isArray(playlistId) ? [...new Set(playlistId)] : [playlistId];
+                let titles = Array.isArray(title) ? [...new Set(title)] : [title];
+                
+                // Don't split titles by comma - treat each title as a whole
+                titles = titles.map(t => t.trim()).filter(t => t);
 
                 // Get existing history
                 let history = [];
@@ -1294,14 +1320,14 @@
                 const addPlaylistButton = document.getElementById('add-playlist-button');
                 const isExplicitlyAdding = addPlaylistButton && 
                                          addPlaylistButton.style.display === 'inline' &&
-                                         addPlaylistButton.dataset.adding === 'true'; // New flag to track explicit adds
+                                         addPlaylistButton.dataset.adding === 'true';
 
                 let newEntry;
                 if (isExplicitlyAdding && history.length > 0) {
                     const current = history[0];
                     newEntry = {
-                        ids: [...new Set([...current.ids, ...ids])],
-                        titles: [...new Set([...current.titles, ...titles])],
+                        ids: [...new Set([...current.ids, ...ids])],  // Ensure uniqueness when combining
+                        titles: [...new Set([...current.titles, ...titles])],  // Ensure uniqueness when combining
                         timestamp: Date.now()
                     };
                     history.shift();
@@ -1325,20 +1351,22 @@
             }
         }
 
-        // Update addPlaylist function to properly combine playlists
+        // Clean up addPlaylist function
         async function addPlaylist() {
             try {
                 const addButton = document.getElementById('add-playlist-button');
                 addButton.dataset.adding = 'true';
 
-                // Store the current playlist items
+                // Store the current playlist items and index
                 const currentItems = [...playlistItems];
+                const savedIndex = currentIndex;
                 
                 // Load and combine the new playlist
-                await loadPlaylist();
+                await loadPlaylist(true);  // Prevent autoplay
                 
-                // Combine the playlists
+                // Combine the playlists and restore index
                 playlistItems = [...currentItems, ...playlistItems];
+                currentIndex = savedIndex;  // Restore the previous position
                 
                 // Update the display
                 displayPlaylist();
@@ -1441,18 +1469,38 @@
                     contentDiv.appendChild(deleteBtn);
                     itemDiv.appendChild(contentDiv);
                     
-                    // Add click handler for loading playlist
+                    // Update the history item click handler
                     itemDiv.onclick = async () => {
                         try {
                             const input = document.getElementById('playlist-input');
-                            input.value = entry.ids[0];
+                            
+                            // Remove any duplicate playlist IDs and log them
+                            const uniqueIds = [...new Set(entry.ids)];
+                            console.log('Original IDs:', entry.ids);
+                            console.log('Unique IDs:', uniqueIds);
+                            
+                            // Load first playlist normally
+                            console.log('Loading first playlist:', uniqueIds[0]);
+                            input.value = uniqueIds[0];
                             await loadPlaylist();
                             
-                            for (let i = 1; i < entry.ids.length; i++) {
-                                await new Promise(resolve => setTimeout(resolve, 1500));
-                                input.value = entry.ids[i];
-                                await addPlaylist();
+                            // Load additional playlists without auto-playing
+                            if (uniqueIds.length > 1) {
+                                const addButton = document.getElementById('add-playlist-button');
+                                addButton.dataset.adding = 'true';
+                                
+                                for (let i = 1; i < uniqueIds.length; i++) {
+                                    console.log(`Loading additional playlist ${i}:`, uniqueIds[i]);
+                                    await new Promise(resolve => setTimeout(resolve, 1500));
+                                    input.value = uniqueIds[i];
+                                    await loadPlaylist(true);  // Prevent auto-play
+                                }
+                                
+                                addButton.dataset.adding = 'false';
                             }
+
+                            console.log('Final playlist items:', playlistItems.length);
+                            
                         } catch (error) {
                             console.error('Error loading playlist:', error);
                             const errorMsg = document.getElementById('error-message');
@@ -1472,23 +1520,22 @@
             }
         }
 
-        // Update toggleFavorite function to remove debug logs
+        // Update toggleFavorite function to handle combined playlists
         function toggleFavorite() {
             const input = document.getElementById('playlist-input');
-            const playlistId = getPlaylistId(input.value);
+            const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
             
-            if (!playlistId) return;
+            // Get the current playlist info from history
+            const currentPlaylist = history[0];
+            
+            if (!currentPlaylist || !currentPlaylist.ids || !currentPlaylist.titles) return;
             
             try {
                 let favorites = JSON.parse(localStorage.getItem('playlistFavorites') || '[]');
-                const currentPlaylist = {
-                    ids: [playlistId],
-                    titles: playlistItems.map(item => item.snippet.title)
-                };
                 
                 // Check if playlist is already in favorites
                 const existingIndex = favorites.findIndex(entry => 
-                    entry.ids && entry.ids.includes(playlistId)
+                    JSON.stringify(entry.ids) === JSON.stringify(currentPlaylist.ids)
                 );
                 
                 if (existingIndex === -1) {
@@ -1502,8 +1549,10 @@
                 localStorage.setItem('playlistFavorites', JSON.stringify(favorites));
                 updateFavoriteButton();
                 displayFavorites();
+                showNotification(existingIndex === -1 ? 'Added to favorites' : 'Removed from favorites');
             } catch (e) {
                 console.error('Error toggling favorite:', e);
+                showNotification('Error updating favorites');
             }
         }
 
@@ -1756,7 +1805,7 @@
     document.addEventListener('DOMContentLoaded', function() {
             const versionElement = document.getElementById('version');
             if (versionElement) {
-                versionElement.textContent = 'v1.0.3';
+                versionElement.textContent = 'v1.0.4';
             }
         });
 
