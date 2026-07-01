@@ -37,6 +37,41 @@
             border-radius: 4px;
         }
 
+        #playlist-input-multi {
+            flex: 1;
+            min-height: 38px;
+            max-height: 140px;
+            resize: vertical;
+            padding: 8px;
+            margin: 0;
+            background-color: #333;
+            border: 1px solid #555;
+            color: #fff;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: inherit;
+        }
+
+        .mode-toggle {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: #fff;
+            cursor: pointer;
+            white-space: nowrap;
+            user-select: none;
+        }
+
+        .mode-toggle input[type="checkbox"] {
+            flex: none;
+            width: 16px;
+            height: 16px;
+            margin: 0;
+            padding: 0;
+            cursor: pointer;
+            accent-color: #444;
+        }
+
         button, select {
             padding: 8px 16px;
             margin: 0;
@@ -406,7 +441,7 @@
             background-color: #333;
             min-width: 200px;
             box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-            z-index: 1;
+            z-index: 1000;
             border-radius: 4px;
             top: 100%;
             left: 50%;
@@ -584,8 +619,13 @@
     <div class="container">
         <div class="input-section">
             <input type="text" id="playlist-input" placeholder="Enter YouTube Playlist URL or ID">
-            <button onclick="loadPlaylist()">Load Playlist</button>
-            <button id="add-playlist-button" onclick="addPlaylist()" style="display: none;">Add to Current</button>
+            <textarea id="playlist-input-multi" placeholder="Paste multiple playlist URLs or IDs — one per line" style="display: none;"></textarea>
+            <label class="mode-toggle" title="Load several playlists at once">
+                <input type="checkbox" id="multi-toggle" onchange="toggleInputMode()">
+                Multiple
+            </label>
+            <button onclick="handleLoadClick()">Load Playlist</button>
+            <button id="add-playlist-button" onclick="handleAddClick()" style="display: none;">Add to Current</button>
             <button onclick="shufflePlaylist()">Shuffle</button>
             <select id="size-selector" onchange="resizePlayer(); saveSession()">
                 <option value="small">Small</option>
@@ -746,8 +786,104 @@
             // Handle direct IDs
             const idMatch = input.match(/^([A-Za-z0-9_-]+)$/);
             if (idMatch) return idMatch[1];
-            
+
             return null;
+        }
+
+        // Parse several playlist URLs/IDs from a blob of text (newlines, commas, spaces).
+        // Returns a de-duplicated list of playlist IDs.
+        function getPlaylistIds(input) {
+            if (!input) return [];
+            const ids = [];
+            String(input).split(/[\s,]+/).filter(Boolean).forEach(token => {
+                const id = getPlaylistId(token);
+                if (id && !ids.includes(id)) ids.push(id);
+            });
+            return ids;
+        }
+
+        // Read whatever the user typed, honoring the single/multiple toggle
+        function getEnteredIds() {
+            const multiMode = document.getElementById('multi-toggle').checked;
+            if (multiMode) {
+                return getPlaylistIds(document.getElementById('playlist-input-multi').value);
+            }
+            const single = getPlaylistId(document.getElementById('playlist-input').value);
+            return single ? [single] : [];
+        }
+
+        // Switch the input between a single-line field and the multi-line textarea
+        function toggleInputMode() {
+            const multi = document.getElementById('multi-toggle').checked;
+            const single = document.getElementById('playlist-input');
+            const multiField = document.getElementById('playlist-input-multi');
+
+            if (multi) {
+                // Carry a typed single value into the textarea
+                if (single.value.trim() && !multiField.value.trim()) {
+                    multiField.value = single.value.trim();
+                }
+                single.style.display = 'none';
+                multiField.style.display = 'block';
+            } else {
+                // Carry the first entry back into the single field
+                const first = getPlaylistIds(multiField.value)[0];
+                if (first && !single.value.trim()) single.value = first;
+                multiField.style.display = 'none';
+                single.style.display = 'block';
+            }
+        }
+
+        // Load a list of playlists, combining them into one queue.
+        // Drives the existing single-field load + addPlaylist() combine path.
+        async function loadPlaylists(ids, { autoplay = true } = {}) {
+            if (!ids || ids.length === 0) return;
+            const input = document.getElementById('playlist-input');
+
+            input.value = ids[0];
+            await loadPlaylist(!autoplay);
+
+            for (let i = 1; i < ids.length; i++) {
+                // Small settle delay between combines to avoid player/DOM races
+                await new Promise(resolve => setTimeout(resolve, 500));
+                input.value = ids[i];
+                await addPlaylist();
+            }
+        }
+
+        // "Load Playlist" click: loads one or many depending on the toggle
+        async function handleLoadClick() {
+            const ids = getEnteredIds();
+            const errorMsg = document.getElementById('error-message');
+            if (ids.length === 0) {
+                if (errorMsg) {
+                    errorMsg.style.display = 'block';
+                    errorMsg.textContent = 'Error: No valid playlist URL or ID found';
+                }
+                return;
+            }
+            try {
+                await loadPlaylists(ids, { autoplay: true });
+            } catch (e) {
+                // loadPlaylist already surfaces its own error message
+                console.error('Error loading playlists:', e);
+            }
+        }
+
+        // "Add to Current" click: appends one or many depending on the toggle
+        async function handleAddClick() {
+            const multi = document.getElementById('multi-toggle').checked;
+            const input = document.getElementById('playlist-input');
+            if (multi) {
+                const ids = getEnteredIds();
+                for (let i = 0; i < ids.length; i++) {
+                    if (i > 0) await new Promise(resolve => setTimeout(resolve, 500));
+                    input.value = ids[i];
+                    await addPlaylist();
+                }
+            } else {
+                await addPlaylist();
+            }
         }
 
         // Update loadPlaylist function to handle playlist combinations
@@ -1179,13 +1315,13 @@
 
         // Shuffle playlist
         async function shufflePlaylist() {
-            // Nothing loaded yet: if the user typed a playlist, load it first, then shuffle.
+            // Nothing loaded yet: if the user typed playlist(s), load them first, then shuffle.
             // Suppress autoplay so the shuffle picks the starting video, not the original first one.
             if (!playlistItems || playlistItems.length === 0) {
-                const input = document.getElementById('playlist-input').value.trim();
-                if (!input) return;
+                const ids = getEnteredIds();
+                if (ids.length === 0) return;
                 try {
-                    await loadPlaylist(true);
+                    await loadPlaylists(ids, { autoplay: false });
                 } catch (e) {
                     return; // loadPlaylist already surfaces the error to the user
                 }
@@ -1324,7 +1460,6 @@
                 }
 
                 const lastSession = history[0];
-                const input = document.getElementById('playlist-input');
 
                 // Restore loop + player size preferences before loading
                 if (typeof savedSession.isLooping === 'boolean') {
@@ -1334,16 +1469,9 @@
                     document.getElementById('size-selector').value = savedSession.playerSize;
                 }
 
-                // Load the first playlist without autoplaying its default first video
-                input.value = lastSession.ids[0];
-                await loadPlaylist(true);
-
-                // Sequentially load and combine any additional playlists
-                for (let i = 1; i < lastSession.ids.length; i++) {
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                    input.value = lastSession.ids[i];
-                    await addPlaylist();
-                }
+                // Load and combine all saved playlists without autoplaying the default
+                // first video (we jump to the saved position below instead)
+                await loadPlaylists(lastSession.ids, { autoplay: false });
 
                 // Apply the restored player size now that the player exists
                 if (savedSession.playerSize && player) {
@@ -1638,25 +1766,8 @@
                     // Update the history item click handler
                     itemDiv.onclick = async () => {
                         try {
-                            const input = document.getElementById('playlist-input');
-                            
-                            // Remove any duplicate playlist IDs and log them
-                            const uniqueIds = [...new Set(entry.ids)];
-                            console.log('Original IDs:', entry.ids);
-                            console.log('Unique IDs:', uniqueIds);
-                            
-                            // Load first playlist normally
-                            input.value = uniqueIds[0];
-                            await loadPlaylist();
-
-                            // Combine any additional playlists. addPlaylist() concatenates
-                            // onto the existing queue; loadPlaylist() alone would overwrite it.
-                            for (let i = 1; i < uniqueIds.length; i++) {
-                                await new Promise(resolve => setTimeout(resolve, 1500));
-                                input.value = uniqueIds[i];
-                                await addPlaylist();
-                            }
-
+                            // Load and combine every playlist in this history entry
+                            await loadPlaylists([...new Set(entry.ids)], { autoplay: true });
                         } catch (error) {
                             console.error('Error loading playlist:', error);
                             const errorMsg = document.getElementById('error-message');
@@ -1678,7 +1789,6 @@
 
         // Update toggleFavorite function to handle combined playlists
         function toggleFavorite() {
-            const input = document.getElementById('playlist-input');
             const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
             
             // Get the current playlist info from history
@@ -1776,15 +1886,8 @@
                     
                     itemDiv.onclick = async () => {
                         try {
-                            const input = document.getElementById('playlist-input');
-                            input.value = entry.ids[0];
-                            await loadPlaylist();
-                            
-                            for (let i = 1; i < entry.ids.length; i++) {
-                                await new Promise(resolve => setTimeout(resolve, 1500));
-                                input.value = entry.ids[i];
-                                await addPlaylist();
-                            }
+                            // Load and combine every playlist in this favorite
+                            await loadPlaylists(entry.ids, { autoplay: true });
                         } catch (error) {
                             console.error('Error loading playlist:', error);
                             const errorMsg = document.getElementById('error-message');
