@@ -876,6 +876,11 @@
                 displayPlaylist();
                 saveSession();
             }
+
+            // Rare: every video was excluded — tell the user rather than showing a blank list
+            if (playlistItems.length === 0) {
+                showNotification('All videos in this list have been removed');
+            }
         }
 
         // "Load Playlist" click: loads one or many depending on the toggle
@@ -1108,7 +1113,16 @@
         function displayPlaylist() {
             const container = document.getElementById('playlist-container');
             const playlistTitle = document.getElementById('playlist-title');
-            
+
+            // Nothing to show (e.g. every video was filtered out) — clear UI and bail safely
+            if (!playlistItems || playlistItems.length === 0) {
+                if (container) container.innerHTML = '';
+                const counter = document.getElementById('video-counter');
+                if (counter) counter.textContent = '0/0';
+                displayPlaylistGroups();
+                return;
+            }
+
             if (playlistTitle) {
                 const existingHistory = JSON.parse(localStorage.getItem('playlistHistory') || '[]')[0];
                 let titles = [playlistItems[0].snippet.playlistTitle];
@@ -1546,16 +1560,22 @@
 
         // Save session data
         function saveSession() {
+            // Only persist what resume actually reads back. The full playlistItems /
+            // playedVideos arrays are rebuilt from history on resume, and storing thousands
+            // of them can exceed the localStorage quota (which would otherwise throw here,
+            // mid-playback, and surface as a spurious "Error playing video").
             const sessionData = {
                 playlistId: getPlaylistId(document.getElementById('playlist-input').value),
                 currentIndex: currentIndex,
-                playlistItems: playlistItems,
-                playedVideos: playedVideos,
                 isLooping: document.getElementById('loop-checkbox').checked,
                 playerSize: document.getElementById('size-selector').value,
                 lastPlayedIndex: currentIndex
             };
-            localStorage.setItem('youtubePlayerSession', JSON.stringify(sessionData));
+            try {
+                localStorage.setItem('youtubePlayerSession', JSON.stringify(sessionData));
+            } catch (e) {
+                console.error('Could not save session:', e);
+            }
         }
 
 
