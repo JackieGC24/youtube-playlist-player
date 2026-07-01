@@ -105,10 +105,35 @@
         }
 
         .playlist-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             padding: 8px;
             cursor: pointer;
             border-bottom: 1px solid #444;
             touch-action: manipulation;
+        }
+
+        .item-title {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .item-remove {
+            background: none;
+            border: none;
+            color: #555;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0 6px;
+            flex-shrink: 0;
+            transition: color 0.2s;
+        }
+
+        .item-remove:hover {
+            background: none;
+            color: #ff4444;
         }
 
         .playlist-item:hover {
@@ -147,9 +172,16 @@
         }
 
         .chip-name {
+            color: #fff;
+            text-decoration: none;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            transition: color 0.2s;
+        }
+
+        .chip-name:hover {
+            color: #ff4d4d; /* YouTube-ish red on hover */
         }
 
         .chip-remove {
@@ -428,55 +460,6 @@
             background-color: #444;
         }
 
-        .playlist-title-container {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-        }
-
-        .playlist-links-dropdown {
-            position: relative;
-            display: inline-block;
-        }
-
-        .playlist-links-dropdown .dropdown-content {
-            display: none;
-            position: absolute;
-            background-color: #333;
-            min-width: 200px;
-            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-            z-index: 1000;
-            border-radius: 4px;
-            top: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-
-        .playlist-links-dropdown.dropdown-open .dropdown-content {
-            display: block;
-        }
-
-        .playlist-links-dropdown .dropdown-toggle {
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .playlist-links-dropdown .dropdown-content a {
-            color: white;
-            padding: 12px 16px;
-            text-decoration: none;
-            display: block;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .playlist-links-dropdown .dropdown-content a:hover {
-            background-color: #444;
-        }
-
         .playlist-favorites {
             margin-top: 30px;
             padding-top: 20px;
@@ -500,6 +483,21 @@
         }
 
         .favorite-button:hover {
+            transform: scale(1.1);
+        }
+
+        .rename-button {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 6px;
+            transition: color 0.2s ease, transform 0.2s ease;
+        }
+
+        .rename-button:hover {
+            color: #fff;
             transform: scale(1.1);
         }
 
@@ -675,6 +673,7 @@
 
         <div class="playlist-header" id="actual-playlist-header" style="display: none;">
             <div id="playlist-title" class="playlist-title"></div>
+            <button id="rename-button" onclick="renamePlaylist()" class="rename-button" title="Rename this playlist">✎</button>
             <button id="favorite-button" onclick="toggleFavorite()" class="favorite-button">☆</button>
             <div id="video-counter" class="video-counter"></div>
         </div>
@@ -839,6 +838,43 @@
                 await new Promise(resolve => setTimeout(resolve, 500));
                 input.value = ids[i];
                 await addPlaylist();
+            }
+        }
+
+        // Load a saved entry (favorite / recent), restoring its custom name and
+        // per-video exclusions so curation and naming stick across reloads.
+        async function loadSavedEntry(entry, { autoplay = true } = {}) {
+            if (!entry || !Array.isArray(entry.ids) || entry.ids.length === 0) return;
+
+            // Build the combined queue (no autoplay yet — we may filter the first video out)
+            await loadPlaylists([...new Set(entry.ids)], { autoplay: false });
+
+            // Rehydrate the saved metadata onto the freshly-built history entry
+            const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+            if (history.length) {
+                if (entry.customName) history[0].customName = entry.customName;
+                if (entry.excludedVideoIds && entry.excludedVideoIds.length) {
+                    history[0].excludedVideoIds = entry.excludedVideoIds.slice();
+                }
+                localStorage.setItem('playlistHistory', JSON.stringify(history));
+            }
+
+            // Filter out the excluded videos from the live queue
+            const excluded = new Set(entry.excludedVideoIds || []);
+            if (excluded.size) {
+                playlistItems = playlistItems.filter(
+                    it => it.snippet.resourceId && !excluded.has(it.snippet.resourceId.videoId)
+                );
+                currentIndex = 0;
+                playedVideos = playlistItems.length ? [playlistItems[0]] : [];
+            }
+
+            // Refresh UI and start playback
+            if (playlistItems.length && player && autoplay) {
+                await playVideo(0);
+            } else {
+                displayPlaylist();
+                saveSession();
             }
         }
 
@@ -1084,49 +1120,17 @@
                     ids = existingHistory.ids;
                 }
                 
-                const combinedTitle = createCombinedTitle(titles);
-                
-                // Create dropdown menu for multiple playlists (links out to YouTube).
-                // Removal lives in the chips bar (see displayPlaylistGroups).
+                // A user-set custom name wins over the auto-generated combined title
+                const displayName = (existingHistory && existingHistory.customName) || createCombinedTitle(titles);
+
                 if (ids.length > 1) {
-                    playlistTitle.innerHTML = '';
-                    const titleContainer = document.createElement('div');
-                    titleContainer.className = 'playlist-title-container';
-
-                    const titleSpan = document.createElement('span');
-                    titleSpan.textContent = combinedTitle;
-                    titleContainer.appendChild(titleSpan);
-
-                    const dropdown = document.createElement('div');
-                    dropdown.className = 'playlist-links-dropdown';
-                    const caret = document.createElement('span');
-                    caret.className = 'dropdown-toggle';
-                    caret.textContent = '▼';
-                    caret.onclick = (e) => {
-                        e.stopPropagation();
-                        dropdown.classList.toggle('dropdown-open');
-                    };
-                    dropdown.appendChild(caret);
-
-                    const content = document.createElement('div');
-                    content.className = 'dropdown-content';
-
-                    titles.forEach((title, i) => {
-                        const link = document.createElement('a');
-                        link.href = `https://www.youtube.com/playlist?list=${encodeURIComponent(ids[i])}`;
-                        link.target = '_blank';
-                        link.textContent = title;
-                        content.appendChild(link);
-                    });
-
-                    dropdown.appendChild(content);
-                    titleContainer.appendChild(dropdown);
-                    playlistTitle.appendChild(titleContainer);
+                    // Combined: plain label. Each source playlist links out from its chip.
+                    playlistTitle.textContent = displayName;
                 } else {
                     // Single playlist - just show direct link
                     playlistTitle.innerHTML = `
                         <a href="https://www.youtube.com/playlist?list=${encodeURIComponent(ids[0])}"
-                           target="_blank">${escapeHtml(combinedTitle)}</a>
+                           target="_blank">${escapeHtml(displayName)}</a>
                     `;
                 }
             }
@@ -1146,8 +1150,24 @@
                     if (index === currentIndex) {
                         div.classList.add('active');
                     }
-                    div.textContent = item.snippet.title;
                     div.onclick = () => playVideo(index);
+
+                    const titleSpan = document.createElement('span');
+                    titleSpan.className = 'item-title';
+                    titleSpan.textContent = item.snippet.title;
+                    div.appendChild(titleSpan);
+
+                    // Per-video remove (drops just this song from the queue)
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'item-remove';
+                    removeBtn.innerHTML = '&times;';
+                    removeBtn.title = 'Remove this video from the queue';
+                    removeBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        removeVideo(index);
+                    };
+                    div.appendChild(removeBtn);
+
                     container.appendChild(div);
 
                     // If this is the current item, scroll it into view
@@ -1208,8 +1228,11 @@
                 const chip = document.createElement('span');
                 chip.className = 'playlist-chip';
 
-                const name = document.createElement('span');
+                const name = document.createElement('a');
                 name.className = 'chip-name';
+                name.href = `https://www.youtube.com/playlist?list=${encodeURIComponent(id)}`;
+                name.target = '_blank';
+                name.title = 'Open this playlist on YouTube';
                 name.textContent = seen.get(id) || 'Playlist';
                 chip.appendChild(name);
 
@@ -1353,7 +1376,7 @@
 
             playlistItems = remaining;
 
-            // Keep the combined history entry (which drives the title/dropdown) in sync
+            // Keep the combined history entry (which drives the title/chips) in sync
             removeIdFromCurrentHistory(playlistId);
 
             if (wasPlayingRemoved) {
@@ -1377,6 +1400,47 @@
             updateFavoriteButton();
         }
 
+        // Remove a single video from the queue by its position
+        function removeVideo(index) {
+            if (!playlistItems || index < 0 || index >= playlistItems.length) return;
+            if (playlistItems.length === 1) {
+                showNotification("Can't remove the last video");
+                return;
+            }
+
+            const removed = playlistItems[index];
+            const removedPid = removed && removed.snippet && removed.snippet.playlistId;
+            const removedVideoId = removed && removed.snippet &&
+                removed.snippet.resourceId && removed.snippet.resourceId.videoId;
+            const wasCurrent = index === currentIndex;
+
+            playlistItems.splice(index, 1);
+
+            // Keep currentIndex pointing at the right video
+            if (index < currentIndex) {
+                currentIndex--;
+            } else if (wasCurrent) {
+                // Removed the playing video: fall through to whatever now sits here
+                currentIndex = Math.min(currentIndex, playlistItems.length - 1);
+            }
+
+            // If that was the last video of its source playlist, drop the whole playlist;
+            // otherwise remember to skip just this video the next time the list is loaded.
+            if (removedPid && !playlistItems.some(it => it.snippet.playlistId === removedPid)) {
+                removeIdFromCurrentHistory(removedPid);
+            } else if (removedVideoId) {
+                excludeVideoInCurrentEntry(removedVideoId);
+            }
+
+            if (wasCurrent && player) {
+                // Continue playback with the video that took this slot
+                playVideo(currentIndex); // re-renders, saves, loads
+            } else {
+                displayPlaylist();
+                saveSession();
+            }
+        }
+
         // Drop a playlist id (and its matching title) from the current history entry
         function removeIdFromCurrentHistory(playlistId) {
             try {
@@ -1395,6 +1459,62 @@
                 displayHistory();
             } catch (e) {
                 console.error('Error updating history after removal:', e);
+            }
+        }
+
+        // Record a video id to skip on future loads of the current entry (and its favorite)
+        function excludeVideoInCurrentEntry(videoId) {
+            try {
+                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+                if (!history.length) return;
+
+                const entry = history[0];
+                entry.excludedVideoIds = entry.excludedVideoIds || [];
+                if (!entry.excludedVideoIds.includes(videoId)) {
+                    entry.excludedVideoIds.push(videoId);
+                }
+                localStorage.setItem('playlistHistory', JSON.stringify(history));
+
+                // Keep a matching favorite's exclusion list in sync
+                const favorites = JSON.parse(localStorage.getItem('playlistFavorites') || '[]');
+                const favIdx = favorites.findIndex(f =>
+                    JSON.stringify(f.ids) === JSON.stringify(entry.ids)
+                );
+                if (favIdx !== -1) {
+                    favorites[favIdx].excludedVideoIds = entry.excludedVideoIds.slice();
+                    localStorage.setItem('playlistFavorites', JSON.stringify(favorites));
+                }
+            } catch (e) {
+                console.error('Error recording excluded video:', e);
+            }
+        }
+
+        // Clear exclusions for videos brought back into the queue (e.g. by re-adding a
+        // playlist), so a restored song stays restored on future loads of the entry.
+        function unexcludeVideosInCurrentEntry(videoIds) {
+            if (!videoIds || !videoIds.length) return;
+            try {
+                const restore = new Set(videoIds);
+
+                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+                if (!history.length || !Array.isArray(history[0].excludedVideoIds)) return;
+
+                const entry = history[0];
+                entry.excludedVideoIds = entry.excludedVideoIds.filter(id => !restore.has(id));
+                localStorage.setItem('playlistHistory', JSON.stringify(history));
+
+                // Keep a matching favorite's exclusion list in sync
+                const favorites = JSON.parse(localStorage.getItem('playlistFavorites') || '[]');
+                const favIdx = favorites.findIndex(f =>
+                    JSON.stringify(f.ids) === JSON.stringify(entry.ids)
+                );
+                if (favIdx !== -1 && Array.isArray(favorites[favIdx].excludedVideoIds)) {
+                    favorites[favIdx].excludedVideoIds =
+                        favorites[favIdx].excludedVideoIds.filter(id => !restore.has(id));
+                    localStorage.setItem('playlistFavorites', JSON.stringify(favorites));
+                }
+            } catch (e) {
+                console.error('Error clearing exclusions on re-add:', e);
             }
         }
 
@@ -1459,9 +1579,9 @@
                     document.getElementById('size-selector').value = savedSession.playerSize;
                 }
 
-                // Load and combine all saved playlists without autoplaying the default
-                // first video (we jump to the saved position below instead)
-                await loadPlaylists(lastSession.ids, { autoplay: false });
+                // Load and combine all saved playlists (restoring name + exclusions)
+                // without autoplaying — we jump to the saved position below instead
+                await loadSavedEntry(lastSession, { autoplay: false });
 
                 // Apply the restored player size now that the player exists
                 if (savedSession.playerSize && player) {
@@ -1574,14 +1694,6 @@
             window.addEventListener('beforeunload', () => {
                 if (playlistItems.length) saveSession();
             });
-
-            // Close the playlist dropdown when clicking anywhere outside it
-            document.addEventListener('click', (e) => {
-                document.querySelectorAll('.playlist-links-dropdown.dropdown-open')
-                    .forEach(dd => {
-                        if (!dd.contains(e.target)) dd.classList.remove('dropdown-open');
-                    });
-            });
         });
 
         function saveToHistory(playlistId, title) {
@@ -1612,7 +1724,13 @@
                     newEntry = {
                         ids: [...new Set([...current.ids, ...ids])],  // Ensure uniqueness when combining
                         titles: [...new Set([...current.titles, ...titles])],  // Ensure uniqueness when combining
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        // Preserve a name the user gave this combo when adding more playlists
+                        ...(current.customName ? { customName: current.customName } : {}),
+                        // Preserve any per-video exclusions across the add
+                        ...(current.excludedVideoIds && current.excludedVideoIds.length
+                            ? { excludedVideoIds: current.excludedVideoIds }
+                            : {})
                     };
                     history.shift();
                 } else {
@@ -1647,10 +1765,25 @@
                 
                 // Load and combine the new playlist
                 await loadPlaylist(true);  // Prevent autoplay
-                
-                // Combine the playlists and restore index
-                playlistItems = [...currentItems, ...playlistItems];
+
+                // Combine, skipping videos already in the queue (dedupe by video id)
+                const existingVideoIds = new Set(
+                    currentItems.map(it => it.snippet && it.snippet.resourceId && it.snippet.resourceId.videoId)
+                );
+                const newUnique = playlistItems.filter(it => {
+                    const vid = it.snippet && it.snippet.resourceId && it.snippet.resourceId.videoId;
+                    return vid && !existingVideoIds.has(vid);
+                });
+                playlistItems = [...currentItems, ...newUnique];
                 currentIndex = savedIndex;  // Restore the previous position
+
+                // Re-adding a playlist restores songs you'd previously removed, so drop
+                // those from the saved exclusion list to make the restore stick.
+                unexcludeVideosInCurrentEntry(
+                    newUnique
+                        .map(it => it.snippet && it.snippet.resourceId && it.snippet.resourceId.videoId)
+                        .filter(Boolean)
+                );
                 
                 // Update the display
                 displayPlaylist();
@@ -1729,9 +1862,11 @@
                     const titleSpan = document.createElement('span');
                     const mainTitle = entry.titles[0] || 'Untitled Playlist';
                     const additionalCount = entry.titles.length - 1;
-                    titleSpan.textContent = additionalCount > 0 
-                        ? `${mainTitle} (+${additionalCount} more)`
-                        : mainTitle;
+                    titleSpan.textContent = entry.customName
+                        ? entry.customName
+                        : (additionalCount > 0
+                            ? `${mainTitle} (+${additionalCount} more)`
+                            : mainTitle);
                     
                     // Create delete button with absolute positioning
                     const deleteBtn = document.createElement('button');
@@ -1756,8 +1891,8 @@
                     // Update the history item click handler
                     itemDiv.onclick = async () => {
                         try {
-                            // Load and combine every playlist in this history entry
-                            await loadPlaylists([...new Set(entry.ids)], { autoplay: true });
+                            // Load the recent entry, restoring its name + curated exclusions
+                            await loadSavedEntry(entry, { autoplay: true });
                         } catch (error) {
                             console.error('Error loading playlist:', error);
                             const errorMsg = document.getElementById('error-message');
@@ -1774,6 +1909,53 @@
             } catch (e) {
                 console.error('Error in displayHistory:', e);
                 historyContainer.innerHTML = '<div class="history-item">Error loading history</div>';
+            }
+        }
+
+        // Rename the current playlist entry; the name flows into the header,
+        // favorites, and recent list. Clearing it restores the auto-generated title.
+        function renamePlaylist() {
+            try {
+                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+                if (!history.length || !history[0].ids) {
+                    showNotification('Load a playlist before renaming');
+                    return;
+                }
+
+                const entry = history[0];
+                const current = entry.customName || createCombinedTitle(entry.titles);
+                const input = prompt('Name this playlist (leave blank to reset):', current);
+                if (input === null) return; // cancelled
+
+                const trimmed = input.trim();
+                if (trimmed) {
+                    entry.customName = trimmed;
+                } else {
+                    delete entry.customName; // reset to the auto-generated title
+                }
+                localStorage.setItem('playlistHistory', JSON.stringify(history));
+
+                // Keep a matching favorite in sync with the new name
+                const favorites = JSON.parse(localStorage.getItem('playlistFavorites') || '[]');
+                const favIdx = favorites.findIndex(f =>
+                    JSON.stringify(f.ids) === JSON.stringify(entry.ids)
+                );
+                if (favIdx !== -1) {
+                    if (trimmed) {
+                        favorites[favIdx].customName = trimmed;
+                    } else {
+                        delete favorites[favIdx].customName;
+                    }
+                    localStorage.setItem('playlistFavorites', JSON.stringify(favorites));
+                }
+
+                displayPlaylist();
+                displayFavorites();
+                displayHistory();
+                showNotification(trimmed ? 'Playlist renamed' : 'Name reset');
+            } catch (e) {
+                console.error('Error renaming playlist:', e);
+                showNotification('Error renaming playlist');
             }
         }
 
@@ -1850,9 +2032,11 @@
                     const titleSpan = document.createElement('span');
                     const mainTitle = entry.titles[0] || 'Untitled Playlist';
                     const additionalCount = entry.titles.length - 1;
-                    titleSpan.textContent = additionalCount > 0 
-                        ? `${mainTitle} (+${additionalCount} more)`
-                        : mainTitle;
+                    titleSpan.textContent = entry.customName
+                        ? entry.customName
+                        : (additionalCount > 0
+                            ? `${mainTitle} (+${additionalCount} more)`
+                            : mainTitle);
                     
                     const deleteBtn = document.createElement('button');
                     deleteBtn.innerHTML = '×';
@@ -1876,8 +2060,8 @@
                     
                     itemDiv.onclick = async () => {
                         try {
-                            // Load and combine every playlist in this favorite
-                            await loadPlaylists(entry.ids, { autoplay: true });
+                            // Load the favorite, restoring its name + curated exclusions
+                            await loadSavedEntry(entry, { autoplay: true });
                         } catch (error) {
                             console.error('Error loading playlist:', error);
                             const errorMsg = document.getElementById('error-message');
@@ -1887,7 +2071,7 @@
                             }
                         }
                     };
-                    
+
                     container.appendChild(itemDiv);
                 });
 
