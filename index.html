@@ -119,48 +119,54 @@
             background-color: #444;
         }
 
-        /* Group boundary header shown when several playlists are combined */
-        .playlist-group-header {
+        /* Source-playlist chips shown above the list when playlists are combined */
+        .playlist-groups {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
-            justify-content: space-between;
             gap: 8px;
-            padding: 8px;
-            margin-top: 6px;
-            background-color: #202020;
-            color: #bbb;
-            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .groups-label {
+            color: #888;
             font-size: 0.9em;
-            border-bottom: 1px solid #555;
-            position: sticky;
-            top: 0;
-            z-index: 1;
         }
 
-        .playlist-group-header:first-child {
-            margin-top: 0;
+        .playlist-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            max-width: 260px;
+            padding: 4px 6px 4px 12px;
+            background-color: #333;
+            border: 1px solid #555;
+            border-radius: 14px;
+            font-size: 0.9em;
+            color: #fff;
         }
 
-        .group-header-title {
+        .chip-name {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
 
-        .group-remove-button {
+        .chip-remove {
             background: none;
             border: none;
-            color: #666;
-            font-size: 18px;
+            color: #999;
+            font-size: 16px;
             line-height: 1;
             cursor: pointer;
             padding: 0 4px;
-            transition: color 0.2s;
+            border-radius: 50%;
+            transition: color 0.2s, background-color 0.2s;
         }
 
-        .group-remove-button:hover {
-            background: none;
-            color: #ff4444;
+        .chip-remove:hover {
+            color: #fff;
+            background-color: #ff4444;
         }
 
         .controls {
@@ -471,23 +477,6 @@
             background-color: #444;
         }
 
-        .playlist-links-dropdown .dropdown-content .dropdown-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .playlist-links-dropdown .dropdown-content .dropdown-row a {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .playlist-links-dropdown .dropdown-content .dropdown-row .group-remove-button {
-            padding: 0 12px;
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-
         .playlist-favorites {
             margin-top: 30px;
             padding-top: 20px;
@@ -689,6 +678,8 @@
             <button id="favorite-button" onclick="toggleFavorite()" class="favorite-button">☆</button>
             <div id="video-counter" class="video-counter"></div>
         </div>
+
+        <div id="playlist-groups" class="playlist-groups" style="display: none;"></div>
 
         <div id="playlist-container" style="display: none;"></div>
     </div>
@@ -1095,13 +1086,9 @@
                 
                 const combinedTitle = createCombinedTitle(titles);
                 
-                // Create dropdown menu for multiple playlists
+                // Create dropdown menu for multiple playlists (links out to YouTube).
+                // Removal lives in the chips bar (see displayPlaylistGroups).
                 if (ids.length > 1) {
-                    // Ids actually present in the current queue — only these can be removed
-                    const queueIds = new Set(
-                        playlistItems.map(it => it && it.snippet && it.snippet.playlistId)
-                    );
-
                     playlistTitle.innerHTML = '';
                     const titleContainer = document.createElement('div');
                     titleContainer.className = 'playlist-title-container';
@@ -1125,32 +1112,11 @@
                     content.className = 'dropdown-content';
 
                     titles.forEach((title, i) => {
-                        const row = document.createElement('div');
-                        row.className = 'dropdown-row';
-
                         const link = document.createElement('a');
                         link.href = `https://www.youtube.com/playlist?list=${encodeURIComponent(ids[i])}`;
                         link.target = '_blank';
                         link.textContent = title;
-                        row.appendChild(link);
-
-                        // Offer removal only for playlists still in the queue.
-                        // Works after shuffle since it targets the playlist id, not order.
-                        if (queueIds.has(ids[i])) {
-                            const removeBtn = document.createElement('button');
-                            removeBtn.className = 'group-remove-button';
-                            removeBtn.innerHTML = '&times;';
-                            removeBtn.title = 'Remove this playlist from the queue';
-                            const pid = ids[i];
-                            removeBtn.onclick = (e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                removePlaylistGroup(pid);
-                            };
-                            row.appendChild(removeBtn);
-                        }
-
-                        content.appendChild(row);
+                        content.appendChild(link);
                     });
 
                     dropdown.appendChild(content);
@@ -1165,54 +1131,16 @@
                 }
             }
 
+            // Render the source-playlist chips above the list
+            displayPlaylistGroups();
+
             if (!container || !playlistItems || playlistItems.length === 0) return;
 
             container.innerHTML = ''; // Clear existing content
 
-            // Show per-playlist group headers only when several playlists are combined
-            // AND still in grouped order. After a shuffle the playlists are interleaved
-            // (runs > groups), so headers would be noise — hide them in that case.
-            const distinctPlaylistIds = [...new Set(
-                playlistItems.map(it => it && it.snippet && it.snippet.playlistId)
-            )];
-            let runs = 0, prevRunId = null;
-            for (const it of playlistItems) {
-                const pid = it && it.snippet && it.snippet.playlistId;
-                if (pid !== prevRunId) { runs++; prevRunId = pid; }
-            }
-            const showGroupHeaders = distinctPlaylistIds.length > 1 &&
-                                     runs === distinctPlaylistIds.length;
-            let lastPlaylistId = null;
-
             // Create and append playlist items
             playlistItems.forEach((item, index) => {
                 if (item && item.snippet) {
-                    // Insert a boundary header whenever the source playlist changes
-                    if (showGroupHeaders && item.snippet.playlistId !== lastPlaylistId) {
-                        lastPlaylistId = item.snippet.playlistId;
-
-                        const header = document.createElement('div');
-                        header.className = 'playlist-group-header';
-
-                        const label = document.createElement('span');
-                        label.className = 'group-header-title';
-                        label.textContent = item.snippet.playlistTitle || 'Playlist';
-
-                        const removeBtn = document.createElement('button');
-                        removeBtn.className = 'group-remove-button';
-                        removeBtn.innerHTML = '&times;';
-                        removeBtn.title = 'Remove this playlist from the queue';
-                        const groupId = item.snippet.playlistId;
-                        removeBtn.onclick = (e) => {
-                            e.stopPropagation();
-                            removePlaylistGroup(groupId);
-                        };
-
-                        header.appendChild(label);
-                        header.appendChild(removeBtn);
-                        container.appendChild(header);
-                    }
-
                     const div = document.createElement('div');
                     div.className = 'playlist-item';
                     if (index === currentIndex) {
@@ -1226,7 +1154,7 @@
                     if (index === currentIndex) {
                         // Use setTimeout to ensure DOM is updated
                         setTimeout(() => {
-                            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            div.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                         }, 100);
                     }
                 }
@@ -1237,6 +1165,68 @@
             if (counter) {
                 counter.textContent = `${currentIndex + 1}/${playlistItems.length}`;
             }
+        }
+
+        // Render the chips bar of source playlists (with per-playlist remove).
+        // Always visible while multiple playlists are combined, before or after shuffle.
+        function displayPlaylistGroups() {
+            const groupsBar = document.getElementById('playlist-groups');
+            if (!groupsBar) return;
+
+            // Distinct source playlists currently in the queue, keeping a title for each
+            const seen = new Map(); // playlistId -> title
+            playlistItems.forEach(it => {
+                const pid = it && it.snippet && it.snippet.playlistId;
+                if (pid && !seen.has(pid)) {
+                    seen.set(pid, (it.snippet.playlistTitle) || 'Playlist');
+                }
+            });
+
+            // Only relevant when more than one playlist is combined
+            if (seen.size <= 1) {
+                groupsBar.style.display = 'none';
+                groupsBar.innerHTML = '';
+                return;
+            }
+
+            // Prefer the stable load order stored in history, falling back to queue order
+            let orderedIds = [...seen.keys()];
+            const hist = JSON.parse(localStorage.getItem('playlistHistory') || '[]')[0];
+            if (hist && Array.isArray(hist.ids)) {
+                const ordered = hist.ids.filter(id => seen.has(id));
+                seen.forEach((_, id) => { if (!ordered.includes(id)) ordered.push(id); });
+                if (ordered.length) orderedIds = ordered;
+            }
+
+            groupsBar.innerHTML = '';
+            const label = document.createElement('span');
+            label.className = 'groups-label';
+            label.textContent = 'Playlists:';
+            groupsBar.appendChild(label);
+
+            orderedIds.forEach(id => {
+                const chip = document.createElement('span');
+                chip.className = 'playlist-chip';
+
+                const name = document.createElement('span');
+                name.className = 'chip-name';
+                name.textContent = seen.get(id) || 'Playlist';
+                chip.appendChild(name);
+
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'chip-remove';
+                removeBtn.innerHTML = '&times;';
+                removeBtn.title = 'Remove this playlist from the queue';
+                removeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removePlaylistGroup(id);
+                };
+                chip.appendChild(removeBtn);
+
+                groupsBar.appendChild(chip);
+            });
+
+            groupsBar.style.display = 'flex';
         }
 
         // Play video at specific index
