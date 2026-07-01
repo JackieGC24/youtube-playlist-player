@@ -413,8 +413,13 @@
             transform: translateX(-50%);
         }
 
-        .playlist-links-dropdown:hover .dropdown-content {
+        .playlist-links-dropdown.dropdown-open .dropdown-content {
             display: block;
+        }
+
+        .playlist-links-dropdown .dropdown-toggle {
+            cursor: pointer;
+            user-select: none;
         }
 
         .playlist-links-dropdown .dropdown-content a {
@@ -429,6 +434,23 @@
 
         .playlist-links-dropdown .dropdown-content a:hover {
             background-color: #444;
+        }
+
+        .playlist-links-dropdown .dropdown-content .dropdown-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .playlist-links-dropdown .dropdown-content .dropdown-row a {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .playlist-links-dropdown .dropdown-content .dropdown-row .group-remove-button {
+            padding: 0 12px;
+            font-size: 16px;
+            flex-shrink: 0;
         }
 
         .playlist-favorites {
@@ -939,20 +961,65 @@
                 
                 // Create dropdown menu for multiple playlists
                 if (ids.length > 1) {
-                    playlistTitle.innerHTML = `
-                        <div class="playlist-title-container">
-                            <span>${escapeHtml(combinedTitle)}</span>
-                            <div class="playlist-links-dropdown">
-                                <span>▼</span>
-                                <div class="dropdown-content">
-                                    ${titles.map((title, i) =>
-                                        `<a href="https://www.youtube.com/playlist?list=${encodeURIComponent(ids[i])}"
-                                            target="_blank">${escapeHtml(title)}</a>`
-                                    ).join('')}
-                                </div>
-                            </div>
-                        </div>
-                    `;
+                    // Ids actually present in the current queue — only these can be removed
+                    const queueIds = new Set(
+                        playlistItems.map(it => it && it.snippet && it.snippet.playlistId)
+                    );
+
+                    playlistTitle.innerHTML = '';
+                    const titleContainer = document.createElement('div');
+                    titleContainer.className = 'playlist-title-container';
+
+                    const titleSpan = document.createElement('span');
+                    titleSpan.textContent = combinedTitle;
+                    titleContainer.appendChild(titleSpan);
+
+                    const dropdown = document.createElement('div');
+                    dropdown.className = 'playlist-links-dropdown';
+                    const caret = document.createElement('span');
+                    caret.className = 'dropdown-toggle';
+                    caret.textContent = '▼';
+                    caret.onclick = (e) => {
+                        e.stopPropagation();
+                        dropdown.classList.toggle('dropdown-open');
+                    };
+                    dropdown.appendChild(caret);
+
+                    const content = document.createElement('div');
+                    content.className = 'dropdown-content';
+
+                    titles.forEach((title, i) => {
+                        const row = document.createElement('div');
+                        row.className = 'dropdown-row';
+
+                        const link = document.createElement('a');
+                        link.href = `https://www.youtube.com/playlist?list=${encodeURIComponent(ids[i])}`;
+                        link.target = '_blank';
+                        link.textContent = title;
+                        row.appendChild(link);
+
+                        // Offer removal only for playlists still in the queue.
+                        // Works after shuffle since it targets the playlist id, not order.
+                        if (queueIds.has(ids[i])) {
+                            const removeBtn = document.createElement('button');
+                            removeBtn.className = 'group-remove-button';
+                            removeBtn.innerHTML = '&times;';
+                            removeBtn.title = 'Remove this playlist from the queue';
+                            const pid = ids[i];
+                            removeBtn.onclick = (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                removePlaylistGroup(pid);
+                            };
+                            row.appendChild(removeBtn);
+                        }
+
+                        content.appendChild(row);
+                    });
+
+                    dropdown.appendChild(content);
+                    titleContainer.appendChild(dropdown);
+                    playlistTitle.appendChild(titleContainer);
                 } else {
                     // Single playlist - just show direct link
                     playlistTitle.innerHTML = `
@@ -1388,6 +1455,14 @@
             // Persist the session when leaving so Resume is always accurate
             window.addEventListener('beforeunload', () => {
                 if (playlistItems.length) saveSession();
+            });
+
+            // Close the playlist dropdown when clicking anywhere outside it
+            document.addEventListener('click', (e) => {
+                document.querySelectorAll('.playlist-links-dropdown.dropdown-open')
+                    .forEach(dd => {
+                        if (!dd.contains(e.target)) dd.classList.remove('dropdown-open');
+                    });
             });
         });
 
