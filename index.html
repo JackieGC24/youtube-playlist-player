@@ -593,11 +593,9 @@
             playerReadyResolve = resolve;
         });
 
-        let apiLoaded = false;
         let apiLoadPromise = null;
 
         let playlistItems = [];
-        let originalPlaylist = [];
         let playedVideos = [];
         let currentIndex = 0;
 
@@ -624,7 +622,14 @@
                     },
                     'onStateChange': onPlayerStateChange,
                     'onError': function(event) {
-                        console.error('Player Error:', event);
+                        // 2: invalid param, 5: HTML5 error, 100: removed/private,
+                        // 101/150: embedding disabled by owner. All are unplayable,
+                        // so skip to the next video in the playlist.
+                        console.error('Player Error:', event.data);
+                        const unplayable = [2, 5, 100, 101, 150];
+                        if (unplayable.includes(event.data)) {
+                            playNext();
+                        }
                     }
                 }
             });
@@ -862,6 +867,13 @@
             return `${titles[0].substring(0, 30)}... (+${titles.length - 1} more)`;
         }
 
+        // Escape user-supplied text before inserting it via innerHTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : String(text);
+            return div.innerHTML;
+        }
+
         // Update displayPlaylist function to handle multiple playlist links
         function displayPlaylist() {
             const container = document.getElementById('playlist-container');
@@ -884,13 +896,13 @@
                 if (ids.length > 1) {
                     playlistTitle.innerHTML = `
                         <div class="playlist-title-container">
-                            <span>${combinedTitle}</span>
+                            <span>${escapeHtml(combinedTitle)}</span>
                             <div class="playlist-links-dropdown">
                                 <span>▼</span>
                                 <div class="dropdown-content">
-                                    ${titles.map((title, i) => 
-                                        `<a href="https://www.youtube.com/playlist?list=${ids[i]}" 
-                                            target="_blank">${title}</a>`
+                                    ${titles.map((title, i) =>
+                                        `<a href="https://www.youtube.com/playlist?list=${encodeURIComponent(ids[i])}"
+                                            target="_blank">${escapeHtml(title)}</a>`
                                     ).join('')}
                                 </div>
                             </div>
@@ -899,8 +911,8 @@
                 } else {
                     // Single playlist - just show direct link
                     playlistTitle.innerHTML = `
-                        <a href="https://www.youtube.com/playlist?list=${ids[0]}" 
-                           target="_blank">${combinedTitle}</a>
+                        <a href="https://www.youtube.com/playlist?list=${encodeURIComponent(ids[0])}"
+                           target="_blank">${escapeHtml(combinedTitle)}</a>
                     `;
                 }
             }
@@ -1042,17 +1054,6 @@
             saveSession();
         }
 
-        // Update active item in playlist
-        function updateActiveItem() {
-            const items = document.getElementsByClassName('playlist-item');
-            for (let i = 0; i < items.length; i++) {
-                items[i].classList.remove('active');
-            }
-            if (items[currentIndex]) {
-                items[currentIndex].classList.add('active');
-            }
-        }
-
         // Resize player
         function resizePlayer() {
             const size = document.getElementById('size-selector').value;
@@ -1093,144 +1094,72 @@
             localStorage.setItem('youtubePlayerSession', JSON.stringify(sessionData));
         }
 
-        // Add helper function to update playlist highlighting
-        function updatePlaylistHighlight(index) {
-            console.log('Updating playlist highlight for index:', index);
-            const playlistItems = document.querySelectorAll('.playlist-item');
-            playlistItems.forEach((item, i) => {
-                if (i === index) {
-                    item.classList.add('playing');
-                    item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    console.log('Added playing class to item:', i);
-                } else {
-                    item.classList.remove('playing');
-                }
-            });
-        }
 
-        // Add function to update video counter
-        function updateVideoCounter(index, total) {
-            const counterElement = document.querySelector('.counter');
-            if (counterElement) {
-                counterElement.textContent = `${index + 1}/${total}`;
-            }
-        }
-
-        // Update resumeLastSession function with debug logging
-        function resumeLastSession() {
+        // Restore the last saved session: playlists, position, loop, and size
+        async function resumeLastSession() {
             try {
                 const savedSession = JSON.parse(localStorage.getItem('youtubePlayerSession') || '{}');
                 const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
-                
-                console.log('Saved session:', savedSession); // Debug log
-                console.log('History:', history); // Debug log
-                
+
                 if (!history.length || !history[0].ids || !history[0].ids.length) {
                     return;
                 }
 
                 const lastSession = history[0];
                 const input = document.getElementById('playlist-input');
+
+                // Restore loop + player size preferences before loading
+                if (typeof savedSession.isLooping === 'boolean') {
+                    document.getElementById('loop-checkbox').checked = savedSession.isLooping;
+                }
+                if (savedSession.playerSize) {
+                    document.getElementById('size-selector').value = savedSession.playerSize;
+                }
+
+                // Load the first playlist without autoplaying its default first video
                 input.value = lastSession.ids[0];
+                await loadPlaylist(true);
 
-                loadPlaylist().then(() => {
-                    const welcomeSection = document.getElementById('welcome-section');
-                    const resumeButton = document.getElementById('resume-button');
-                    if (welcomeSection) welcomeSection.style.display = 'none';
-                    if (resumeButton) resumeButton.style.display = 'none';
+                // Sequentially load and combine any additional playlists
+                for (let i = 1; i < lastSession.ids.length; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    input.value = lastSession.ids[i];
+                    await addPlaylist();
+                }
 
-                    const waitForPlaylist = setInterval(() => {
-                        if (playlistItems && playlistItems.length > 0) {
-                            clearInterval(waitForPlaylist);
-                            
-                            // Use the saved currentIndex directly
-                            if (typeof savedSession.currentIndex === 'number' && player) {
-                                console.log('Resuming at index:', savedSession.currentIndex); // Debug log
-                                
-                                // Set the current index
-                                currentIndex = savedSession.currentIndex;
-                                
-                                // Get the video ID for the current index
-                                const videoId = playlistItems[currentIndex].snippet.resourceId.videoId;
-                                console.log('Loading video ID:', videoId); // Debug log
-                                
-                                // Update counter
-                                const counterElement = document.querySelector('.counter');
-                                if (counterElement) {
-                                    counterElement.textContent = `${currentIndex + 1}/${playlistItems.length}`;
-                                }
-                                
-                                // Update playlist highlighting
-                                const allItems = document.querySelectorAll('.playlist-item');
-                                allItems.forEach((item, index) => {
-                                    item.classList.toggle('playing', index === currentIndex);
-                                });
+                // Apply the restored player size now that the player exists
+                if (savedSession.playerSize && player) {
+                    resizePlayer();
+                }
 
-                                // Scroll to current item
-                                const currentItem = allItems[currentIndex];
-                                if (currentItem) {
-                                    currentItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                                }
+                // Jump to the saved position and start playback there.
+                // playVideo() updates the counter, active highlight, and scroll.
+                if (typeof savedSession.currentIndex === 'number' &&
+                    player && playlistItems[savedSession.currentIndex]) {
+                    await playVideo(savedSession.currentIndex);
+                }
 
-                                // Load the video
-                                player.loadVideoById(videoId);
-                            }
-
-                            // Load additional playlists
-                            if (lastSession.ids.length > 1) {
-                                const savedIndex = currentIndex;  // Save position after first playlist loads
-                                
-                                for (let i = 1; i < lastSession.ids.length; i++) {
-                                    new Promise(resolve => setTimeout(resolve, 1500)).then(() => {
-                                        const currentItems = [...playlistItems];  // Save current items
-                                        
-                                        input.value = lastSession.ids[i];
-                                        loadPlaylist();
-                                    });
-                                    
-                                    // Combine while maintaining position
-                                    playlistItems = [...currentItems, ...playlistItems];
-                                    currentIndex = savedIndex;  // Keep original position
-                                    displayPlaylist();
-                                }
-                            }
-                        }
-                    }, 100);
-                }).catch(error => {
-                    console.error('Error resuming session:', error);
-                });
+                const welcomeSection = document.getElementById('welcome-section');
+                const resumeButton = document.getElementById('resume-button');
+                if (welcomeSection) welcomeSection.style.display = 'none';
+                if (resumeButton) resumeButton.style.display = 'none';
             } catch (e) {
                 console.error('Error in resumeLastSession:', e);
             }
         }
-
-        // Add event listener for video index changes
-        window.addEventListener('videoIndexChanged', (event) => {
-            updateVideoCounter(event.detail.index, event.detail.total);
-        });
-
-        // Check if there's a saved session on page load
-        window.addEventListener('load', function() {
-            const savedSession = localStorage.getItem('youtubePlayerSession');
-            if (!savedSession) {
-                document.getElementById('resume-button').style.display = 'none';
-            }
-        });
 
         // Load YouTube IFrame API with error handling
         function loadYouTubeAPI() {
             if (apiLoadPromise) return apiLoadPromise;
             
             apiLoadPromise = new Promise((resolve) => {
-                if (window.YT) {
-                    apiLoaded = true;
+                if (window.YT && window.YT.Player) {
                     resolve();
                     return;
                 }
 
                 window.onYouTubeIframeAPIReady = function() {
                     console.log('YouTube API loaded');
-                    apiLoaded = true;
                     resolve();
                 };
 
@@ -1256,49 +1185,60 @@
             }
         }
 
-        // Call this when the page loads
-        document.addEventListener('DOMContentLoaded', initializeApplication);
-
+        // Single consolidated page-load initializer
         document.addEventListener('DOMContentLoaded', () => {
-            // Show initial UI state
-            const exampleSection = document.getElementById('example-section');
+            initializeApplication();
+
+            // Initial UI state
             const playlistContainer = document.getElementById('playlist-container');
-            
-            if (exampleSection) {
-                exampleSection.style.display = 'block';
-            }
             if (playlistContainer) {
                 playlistContainer.style.display = 'none';
             }
-        });
 
-        // Add this new function to fetch playlist details
-        async function fetchPlaylistDetails(playlistId) {
-            //const apiKey = 'AIzaSyBZ4Ow6AF03kHdJrbeYODzJ8FFNKZ-iTVE'; // Your API key
-            const apiKey = 'AIzaSyD4nA8bLUU8rUqx6dZwIOV7x6EXyFPru9w';
-            const url = `https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${playlistId}&key=${apiKey}`;
-            
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (data.error) {
-                    throw new Error(data.error.message);
-                }
-
-                if (data.items && data.items.length > 0) {
-                    return {
-                        title: data.items[0].snippet.title,
-                        description: data.items[0].snippet.description
-                    };
-                }
-                
-                throw new Error('Playlist not found');
-            } catch (error) {
-                console.error('Error fetching playlist details:', error);
-                return { title: 'Playlist', description: '' };
+            // Show resume button only if a saved session exists
+            const resumeButton = document.getElementById('resume-button');
+            if (resumeButton && !localStorage.getItem('youtubePlayerSession')) {
+                resumeButton.style.display = 'none';
             }
-        }
+
+            // Populate favorites, history, and version
+            displayFavorites();
+            displayHistory();
+
+            const versionElement = document.getElementById('version');
+            if (versionElement) {
+                versionElement.textContent = 'v1.0.5';
+            }
+
+            // Keyboard shortcuts: Space = play/pause, ←/→ = prev/next.
+            // Ignored while typing in the input field.
+            document.addEventListener('keydown', (e) => {
+                const typing = document.activeElement &&
+                    document.activeElement.tagName === 'INPUT';
+                if (typing || !player || !playlistItems.length) return;
+
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    const state = player.getPlayerState();
+                    if (state === YT.PlayerState.PLAYING) {
+                        player.pauseVideo();
+                    } else {
+                        player.playVideo();
+                    }
+                } else if (e.code === 'ArrowRight') {
+                    e.preventDefault();
+                    playNext();
+                } else if (e.code === 'ArrowLeft') {
+                    e.preventDefault();
+                    playPrevious();
+                }
+            });
+
+            // Persist the session when leaving so Resume is always accurate
+            window.addEventListener('beforeunload', () => {
+                if (playlistItems.length) saveSession();
+            });
+        });
 
         function saveToHistory(playlistId, title) {
             try {
@@ -1647,105 +1587,6 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            displayFavorites();
-        });
-
-        // Add this function to initialize the page
-        document.addEventListener('DOMContentLoaded', function() {
-            // Display history immediately on page load
-            displayHistory();
-        });
-
-        // Add version number and styling
-        function addStyles() {
-            const style = document.createElement('style');
-            style.textContent = `
-                .delete-button {
-                    background: none;
-                    border: none;
-                    color: #666;
-                    font-size: 20px;
-                    cursor: pointer;
-                    padding: 0 8px;
-                    margin-left: 8px;
-                    transition: color 0.2s;
-                }
-
-                .delete-button:hover {
-                    color: #ff4444;
-                }
-
-                .history-item, .favorite-item {
-                    padding: 10px;
-                    margin: 5px 0;
-                    background-color: #333;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    transition: background-color 0.2s ease;
-                }
-
-                .history-item:hover, .favorite-item:hover {
-                    background-color: #444;
-                }
-
-                #version {
-                    position: fixed;
-                    bottom: 10px;
-                    right: 10px;
-                    color: #666;
-                    font-size: 12px;
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
-        // Call this when the page loads
-        document.addEventListener('DOMContentLoaded', addStyles);
-
-        // Hide resume button
-        document.addEventListener('DOMContentLoaded', function() {
-            const resumeButton = document.getElementById('resume-button');
-            if (resumeButton) {
-                resumeButton.style.display = 'none';
-            }
-        });
-
-        // Add notification styles
-        const style = document.createElement('style');
-        style.textContent = `
-            .notification {
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background-color: #333;
-                color: white;
-                padding: 15px 20px;
-                border-radius: 5px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-                z-index: 1000;
-                opacity: 0;
-                transition: opacity 0.3s ease;
-            }
-
-            .notification.show {
-                opacity: 1;
-                animation: flashNotification 0.3s ease;
-            }
-
-            @keyframes flashNotification {
-                0% {
-                    background-color: #fff;
-                    color: #333;
-                }
-                100% {
-                    background-color: #333;
-                    color: #fff;
-                }
-            }
-        `;
-        document.head.appendChild(style);
-
         // Update showNotification with longer duration
         function showNotification(message, duration = 5000) {
             // Remove any existing notification
@@ -1769,45 +1610,6 @@
                 setTimeout(() => notification.remove(), 300);
             }, duration);
         }
-
-        // Update cleanupPlaylistHistory to show notification when data is cleared
-        function cleanupPlaylistHistory() {
-            try {
-                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
-                
-                // Filter out invalid entries
-                const validHistory = history.filter(entry => {
-                    return entry 
-                        && Array.isArray(entry.ids) 
-                        && entry.ids.length > 0
-                        && Array.isArray(entry.titles)
-                        && entry.titles.length > 0
-                        && entry.timestamp;
-                });
-
-                // If entries were removed, show notification
-                if (validHistory.length !== history.length) {
-                    const removedCount = history.length - validHistory.length;
-                    showNotification(`Cleaned up ${removedCount} invalid playlist${removedCount !== 1 ? 's' : ''} from history`);
-                    localStorage.setItem('playlistHistory', JSON.stringify(validHistory));
-                }
-                
-                return validHistory;
-            } catch (e) {
-                console.error('Error cleaning history:', e);
-                showNotification('History data was reset due to corruption');
-                localStorage.setItem('playlistHistory', '[]');
-                return [];
-            }
-        }
-    
-    // Add version number
-    document.addEventListener('DOMContentLoaded', function() {
-            const versionElement = document.getElementById('version');
-            if (versionElement) {
-                versionElement.textContent = 'v1.0.4';
-            }
-        });
 
         function clearHistory() {
             try {
