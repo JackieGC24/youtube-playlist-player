@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Ensure the origin is sent so the API key's HTTP-referrer restriction can match -->
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>YouTube Playlist Player</title>
     <style>
         body {
@@ -80,6 +82,50 @@
 
         .playlist-item.active {
             background-color: #444;
+        }
+
+        /* Group boundary header shown when several playlists are combined */
+        .playlist-group-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px;
+            margin-top: 6px;
+            background-color: #202020;
+            color: #bbb;
+            font-weight: 600;
+            font-size: 0.9em;
+            border-bottom: 1px solid #555;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .playlist-group-header:first-child {
+            margin-top: 0;
+        }
+
+        .group-header-title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .group-remove-button {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            padding: 0 4px;
+            transition: color 0.2s;
+        }
+
+        .group-remove-button:hover {
+            background: none;
+            color: #ff4444;
         }
 
         .controls {
@@ -792,7 +838,6 @@
             console.log(`Starting fetch for playlist: ${playlistId}`);
             
             const apiKey = 'AIzaSyBZ4Ow6AF03kHdJrbeYODzJ8FFNKZ-iTVE';
-            //const apiKey = 'AIzaSyD4nA8bLUU8rUqx6dZwIOV7x6EXyFPru9w';
             const maxResults = 50;
             
             try {
@@ -920,10 +965,51 @@
             if (!container || !playlistItems || playlistItems.length === 0) return;
 
             container.innerHTML = ''; // Clear existing content
-            
+
+            // Show per-playlist group headers only when several playlists are combined
+            // AND still in grouped order. After a shuffle the playlists are interleaved
+            // (runs > groups), so headers would be noise — hide them in that case.
+            const distinctPlaylistIds = [...new Set(
+                playlistItems.map(it => it && it.snippet && it.snippet.playlistId)
+            )];
+            let runs = 0, prevRunId = null;
+            for (const it of playlistItems) {
+                const pid = it && it.snippet && it.snippet.playlistId;
+                if (pid !== prevRunId) { runs++; prevRunId = pid; }
+            }
+            const showGroupHeaders = distinctPlaylistIds.length > 1 &&
+                                     runs === distinctPlaylistIds.length;
+            let lastPlaylistId = null;
+
             // Create and append playlist items
             playlistItems.forEach((item, index) => {
                 if (item && item.snippet) {
+                    // Insert a boundary header whenever the source playlist changes
+                    if (showGroupHeaders && item.snippet.playlistId !== lastPlaylistId) {
+                        lastPlaylistId = item.snippet.playlistId;
+
+                        const header = document.createElement('div');
+                        header.className = 'playlist-group-header';
+
+                        const label = document.createElement('span');
+                        label.className = 'group-header-title';
+                        label.textContent = item.snippet.playlistTitle || 'Playlist';
+
+                        const removeBtn = document.createElement('button');
+                        removeBtn.className = 'group-remove-button';
+                        removeBtn.innerHTML = '&times;';
+                        removeBtn.title = 'Remove this playlist from the queue';
+                        const groupId = item.snippet.playlistId;
+                        removeBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            removePlaylistGroup(groupId);
+                        };
+
+                        header.appendChild(label);
+                        header.appendChild(removeBtn);
+                        container.appendChild(header);
+                    }
+
                     const div = document.createElement('div');
                     div.className = 'playlist-item';
                     if (index === currentIndex) {
@@ -1025,33 +1111,98 @@
         }
 
         // Shuffle playlist
-        function shufflePlaylist() {
+        async function shufflePlaylist() {
+            // Nothing loaded yet: if the user typed a playlist, load it first, then shuffle.
+            // Suppress autoplay so the shuffle picks the starting video, not the original first one.
+            if (!playlistItems || playlistItems.length === 0) {
+                const input = document.getElementById('playlist-input').value.trim();
+                if (!input) return;
+                try {
+                    await loadPlaylist(true);
+                } catch (e) {
+                    return; // loadPlaylist already surfaces the error to the user
+                }
+                if (!playlistItems || playlistItems.length === 0) return;
+            }
+
+            // Fisher-Yates over the whole list, including the currently playing video
+            for (let i = playlistItems.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [playlistItems[i], playlistItems[j]] = [playlistItems[j], playlistItems[i]];
+            }
+
+            // Start from the top of the freshly shuffled order
+            currentIndex = 0;
+            playedVideos = [playlistItems[0]];
+
+            // Play the new first video (updates highlight, counter, and saves the session)
+            if (player) {
+                await playVideo(0);
+            } else {
+                displayPlaylist();
+                saveSession();
+            }
+        }
+
+        // Remove every video belonging to one source playlist from the combined queue
+        function removePlaylistGroup(playlistId) {
             if (!playlistItems || playlistItems.length === 0) return;
 
-            // Save current video
-            const currentVideo = playlistItems[currentIndex];
-            
-            // Create a copy of the playlist without current video
-            let remainingVideos = playlistItems.filter((_, index) => index !== currentIndex);
-            
-            // Shuffle remaining videos
-            for (let i = remainingVideos.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [remainingVideos[i], remainingVideos[j]] = [remainingVideos[j], remainingVideos[i]];
+            const currentItem = playlistItems[currentIndex];
+            const currentVideoId = currentItem &&
+                currentItem.snippet.resourceId && currentItem.snippet.resourceId.videoId;
+            const wasPlayingRemoved = currentItem &&
+                currentItem.snippet.playlistId === playlistId;
+
+            const remaining = playlistItems.filter(it => it.snippet.playlistId !== playlistId);
+            // Never remove the last remaining group — leave at least one playlist loaded
+            if (remaining.length === 0 || remaining.length === playlistItems.length) return;
+
+            playlistItems = remaining;
+
+            // Keep the combined history entry (which drives the title/dropdown) in sync
+            removeIdFromCurrentHistory(playlistId);
+
+            if (wasPlayingRemoved) {
+                // The playing video was removed: play whatever now sits at that position
+                currentIndex = Math.min(currentIndex, playlistItems.length - 1);
+                playedVideos = [playlistItems[currentIndex]];
+                if (player) {
+                    playVideo(currentIndex);
+                    return; // playVideo re-renders and saves
+                }
+            } else {
+                // The playing video survived — re-point currentIndex at its new position
+                const newIndex = playlistItems.findIndex(
+                    it => it.snippet.resourceId.videoId === currentVideoId
+                );
+                currentIndex = newIndex >= 0 ? newIndex : 0;
             }
-            
-            // Put current video back at top
-            playlistItems = [currentVideo, ...remainingVideos];
-            currentIndex = 0;
-            
-            // Reset played videos array
-            playedVideos = [currentVideo];
-            
-            // Update display
+
             displayPlaylist();
-            
-            // Save the current state
             saveSession();
+            updateFavoriteButton();
+        }
+
+        // Drop a playlist id (and its matching title) from the current history entry
+        function removeIdFromCurrentHistory(playlistId) {
+            try {
+                const history = JSON.parse(localStorage.getItem('playlistHistory') || '[]');
+                if (!history.length || !Array.isArray(history[0].ids)) return;
+
+                const entry = history[0];
+                const idx = entry.ids.indexOf(playlistId);
+                if (idx === -1) return;
+
+                entry.ids.splice(idx, 1);
+                if (Array.isArray(entry.titles) && idx < entry.titles.length) {
+                    entry.titles.splice(idx, 1);
+                }
+                localStorage.setItem('playlistHistory', JSON.stringify(history));
+                displayHistory();
+            } catch (e) {
+                console.error('Error updating history after removal:', e);
+            }
         }
 
         // Resize player
@@ -1420,27 +1571,17 @@
                             console.log('Unique IDs:', uniqueIds);
                             
                             // Load first playlist normally
-                            console.log('Loading first playlist:', uniqueIds[0]);
                             input.value = uniqueIds[0];
                             await loadPlaylist();
-                            
-                            // Load additional playlists without auto-playing
-                            if (uniqueIds.length > 1) {
-                                const addButton = document.getElementById('add-playlist-button');
-                                addButton.dataset.adding = 'true';
-                                
-                                for (let i = 1; i < uniqueIds.length; i++) {
-                                    console.log(`Loading additional playlist ${i}:`, uniqueIds[i]);
-                                    await new Promise(resolve => setTimeout(resolve, 1500));
-                                    input.value = uniqueIds[i];
-                                    await loadPlaylist(true);  // Prevent auto-play
-                                }
-                                
-                                addButton.dataset.adding = 'false';
+
+                            // Combine any additional playlists. addPlaylist() concatenates
+                            // onto the existing queue; loadPlaylist() alone would overwrite it.
+                            for (let i = 1; i < uniqueIds.length; i++) {
+                                await new Promise(resolve => setTimeout(resolve, 1500));
+                                input.value = uniqueIds[i];
+                                await addPlaylist();
                             }
 
-                            console.log('Final playlist items:', playlistItems.length);
-                            
                         } catch (error) {
                             console.error('Error loading playlist:', error);
                             const errorMsg = document.getElementById('error-message');
